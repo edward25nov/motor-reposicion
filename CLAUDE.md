@@ -1,0 +1,41 @@
+# Motor de reposición de inventario
+
+Producto de ML que, en cada fecha de corte, entrega por tienda y familia de producto: pronóstico de ventas diario con cuantiles, pedido sugerido y seguimiento del desempeño de los pronósticos ya publicados.
+Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_events, oil y transactions. Laboratorio 1 del curso Product Development.
+
+## Comandos
+- `make test`: ejecuta las pruebas.
+- Sin make: `PYTHONPATH=src python -m pytest -q`.
+
+## Estructura
+- `src/inventario/`: toda la lógica, en módulos de Python con pruebas.
+- `dags/`: DAGs de Airflow 3. Solo orquestan: llaman funciones de `src/inventario/`.
+- `configs/`: configuración versionada (costos de negocio, modelo, fuentes).
+- `docker/`: Airflow 3 con Docker Compose.
+- `tests/`: pruebas con pytest; corren en cada Pull Request (GitHub Actions).
+- `DECISIONES.md`: decisiones técnicas y de producto, con alternativas y justificación.
+
+## Reglas de disponibilidad de la información
+- Toda predicción se construye solo con la información disponible en el momento en que se emite (fecha de corte).
+- La disponibilidad se mide por la llegada del archivo a la bandeja, no por la fecha de los datos que contiene.
+- La bandeja es un sistema externo: se lee, nunca se modifica (se monta en solo lectura).
+- Los pronósticos publicados son inmutables; una corrección de datos reprocesa la preparación y el seguimiento, no la publicación.
+- La validación temporal usa los mismos cortes para todos los modelos comparados; nunca split aleatorio.
+
+## Reglas de Airflow
+- Cada tarea usa `logical_date`, nunca la fecha de hoy.
+- Las tareas son idempotentes: cada fecha escribe en su propia carpeta y reemplaza su resultado (borrar e insertar en una transacción).
+- XCom solo lleva valores pequeños (rutas, conteos); los datos van a disco.
+- Los datos inválidos detienen el flujo antes de contaminar el resultado; las situaciones esperadas del negocio (feriados, tiendas cerradas, archivos atrasados) no provocan fallas.
+
+## Reglas de datos
+- Ningún dato ni modelo se guarda en Git: se versionan con DVC (`dvc add` y `dvc push`).
+- En Git solo van los punteros `.dvc` y los `.gitignore` de datos.
+- Si cambian los datos, hacer `dvc add` y `dvc push` antes de commitear los punteros `.dvc`.
+- Los costos de negocio viven en `configs/`; cambiarlos debe cambiar el pedido sin tocar código.
+
+## Reglas de Git
+- Nunca se trabaja en main: todo cambio va en una rama (feat/..., fix/..., docs/..., chore/...) y entra por Pull Request.
+- Commits pequeños con un solo cambio lógico cada uno.
+- Mensajes con Conventional Commits en español: `tipo: descripción` (feat, fix, docs, refactor, test, chore, ci, build).
+- Nunca hacer force push (`--force` ni `--force-with-lease`) ni borrar tags.
