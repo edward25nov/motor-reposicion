@@ -32,6 +32,8 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - Ningún dato ni modelo se guarda en Git: se versionan con DVC (`dvc add` y `dvc push`).
 - En Git solo van los punteros `.dvc` y los `.gitignore` de datos.
 - Si cambian los datos, hacer `dvc add` y `dvc push` antes de commitear los punteros `.dvc`.
+- Remoto de DVC: `origin` en DagsHub (https://dagshub.com/edward25nov/motor-reposicion.dvc). Las credenciales van solo en `.dvc/config.local`, nunca en Git.
+- Los CSV originales de Kaggle viven en `data/raw/kaggle/` (versionados con DVC). Todo el producto debe poder reconstruirse a partir de ellos sin acceso al remoto: así lo evalúa el docente.
 - Los costos de negocio viven en `configs/`; cambiarlos debe cambiar el pedido sin tocar código.
 
 ## Reglas de Git
