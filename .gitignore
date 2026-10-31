@@ -6,3 +6,4 @@ __pycache__/
 .env
 /origen/
 /origen.tmp/
+/data/ingesta/
