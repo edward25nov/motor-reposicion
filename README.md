@@ -67,4 +67,16 @@ El resultado queda en `data/ingesta/`: copia de lo recibido, datos validados, el
 reporte por corte en `reportes/<corte>.json`. Las reglas de validación están en `DECISIONES.md`
 (D9 a D13).
 
+## Preparación de datos para el modelo
+
+Para una fecha de corte (lunes) se arma la tabla de features con lo que se conocía ese día:
+
+```bash
+make preparar CORTE=2017-07-17
+```
+
+Escribe `data/procesados/features/corte=<fecha>.parquet` (una fila por tienda, familia y día del
+horizonte de 14 días) y `data/procesados/calidad/corte=<fecha>.json`. Si las ventas están demasiado
+atrasadas, se detiene con `DatosInsuficientes`. Decisiones en `DECISIONES.md` (D14 a D18).
+
 Las instrucciones para levantar y ejecutar el producto se agregarán en este archivo.

@@ -6,6 +6,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 ## Comandos
 - `make test`: ejecuta las pruebas.
 - `make ingesta CORTE=AAAA-MM-DD`: procesa la bandeja hasta el corte (valida, cuarentena, registro).
+- `make preparar CORTE=AAAA-MM-DD`: features del corte en `data/procesados/` (lectura as-of).
 - `make origen`: construye la carga histórica y la bandeja en `origen/` a partir de `data/raw/kaggle/`.
 - Sin make: `PYTHONPATH=src python -m pytest -q` y `PYTHONPATH=src python -m inventario.origen.generar`.
 
@@ -13,10 +14,12 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `src/inventario/`: toda la lógica, en módulos de Python con pruebas. Las rutas salen de `rutas.py` (la raíz se cambia con `MOTOR_RAIZ`, lo usan las pruebas).
 - `src/inventario/origen/`: sistema de origen simulado (carga histórica + bandeja) construido desde Kaggle.
 - `src/inventario/ingesta/`: `validacion.py` (reglas puras), `registro.py` (SQLite), `ingestar.py` (proceso por corte), `vigente.py` (lectura as-of).
+- `src/inventario/preparacion/`: `calendario.py` (feriados), `features.py` (features por corte, función pura), `preparar.py` (corte en operación y conjunto de entrenamiento).
+- `data/procesados/`: features y reportes de calidad por corte, no va a Git.
 - `data/ingesta/`: generado por la ingesta (recibidos, validos, registro.db, reportes), no va a Git.
 - `origen/`: generado por `make origen`, no se versiona en Git. `bandeja/llegada=<AAAA-MM-DD>/<fuente>_<clave>.csv`: la carpeta es el día en que el archivo está disponible.
 - `dags/`: DAGs de Airflow 3. Solo orquestan: llaman funciones de `src/inventario/`.
-- `configs/`: configuración versionada (costos de negocio, modelo, fuentes).
+- `configs/`: configuración versionada (siempre se lee del repositorio, aunque cambie `MOTOR_RAIZ`) (costos de negocio, modelo, fuentes).
 - `docker/`: Airflow 3 con Docker Compose.
 - `tests/`: pruebas con pytest; corren en cada Pull Request (GitHub Actions).
 - `DECISIONES.md`: decisiones técnicas y de producto, con alternativas y justificación. **Toda decisión nueva se agrega ahí** (numerada D1, D2, ...) en el mismo Pull Request que la implementa.
@@ -28,6 +31,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - Todo dato que alimente un pronóstico con corte T se lee con `vigente.leer(fuente, T)`: nunca directo de la bandeja ni de `validos/`.
 - `origen/incidentes_simulados.csv` es la hoja de respuestas de la simulación: el flujo nunca la lee; solo la usan las pruebas y la evidencia.
 - Los pronósticos publicados son inmutables; una corrección de datos reprocesa la preparación y el seguimiento, no la publicación.
+- Las features de un corte T solo usan cada fuente hasta T − atraso (`configs/preparacion.yaml`); hay una prueba que altera las ventas posteriores al corte y exige features idénticas.
 - La validación temporal usa los mismos cortes para todos los modelos comparados; nunca split aleatorio.
 
 ## Reglas de Airflow
