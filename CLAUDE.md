@@ -7,6 +7,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `make test`: ejecuta las pruebas.
 - `make ingesta CORTE=AAAA-MM-DD`: procesa la bandeja hasta el corte (valida, cuarentena, registro).
 - `make preparar CORTE=AAAA-MM-DD`: features del corte en `data/procesados/` (lectura as-of).
+- `make backtest SNAPSHOT=AAAA-MM-DD` y `make entrenar SNAPSHOT=AAAA-MM-DD`: comparación de modelos y campeón-retador.
 - `make origen`: construye la carga histórica y la bandeja en `origen/` a partir de `data/raw/kaggle/`.
 - Sin make: `PYTHONPATH=src python -m pytest -q` y `PYTHONPATH=src python -m inventario.origen.generar`.
 
@@ -15,6 +16,8 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `src/inventario/origen/`: sistema de origen simulado (carga histórica + bandeja) construido desde Kaggle.
 - `src/inventario/ingesta/`: `validacion.py` (reglas puras), `registro.py` (SQLite), `ingestar.py` (proceso por corte), `vigente.py` (lectura as-of).
 - `src/inventario/preparacion/`: `calendario.py` (feriados), `features.py` (features por corte, función pura), `preparar.py` (corte en operación y conjunto de entrenamiento).
+- `src/inventario/modelos/`: `baseline.py`, `gbm.py` (misma interfaz `ajustar`/`predecir` con columnas p10…p95), `metricas.py`, `promocion.py` (regla pura), `evaluacion.py` (esquema temporal común), `backtest.py`, `entrenar.py`, `registro.py`.
+- `models/`: versiones entrenadas y `registro.json` (vigente, anterior, decisiones); no va a Git.
 - `data/procesados/`: features y reportes de calidad por corte, no va a Git.
 - `data/ingesta/`: generado por la ingesta (recibidos, validos, registro.db, reportes), no va a Git.
 - `origen/`: generado por `make origen`, no se versiona en Git. `bandeja/llegada=<AAAA-MM-DD>/<fuente>_<clave>.csv`: la carpeta es el día en que el archivo está disponible.
@@ -33,6 +36,12 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - Los pronósticos publicados son inmutables; una corrección de datos reprocesa la preparación y el seguimiento, no la publicación.
 - Las features de un corte T solo usan cada fuente hasta T − atraso (`configs/preparacion.yaml`); hay una prueba que altera las ventas posteriores al corte y exige features idénticas.
 - La validación temporal usa los mismos cortes para todos los modelos comparados; nunca split aleatorio.
+
+## Reglas del modelo
+- Todos los modelos comparados usan los mismos cortes y las mismas filas de entrenamiento (`modelos/evaluacion.py`).
+- Un modelo solo se entrena con filas cuyo objetivo se conocía al inicio de su evaluación.
+- El reemplazo del vigente lo decide solo `promocion.decidir` con la métrica de negocio; nunca a mano.
+- La variable objetivo es log(1 + ventas); las predicciones se devuelven en unidades, ordenadas y no negativas.
 
 ## Reglas de Airflow
 - Cada tarea usa `logical_date`, nunca la fecha de hoy.
