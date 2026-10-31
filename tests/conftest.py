@@ -6,7 +6,8 @@ FAMILIAS = ["BEVERAGES", "PRODUCE"]
 
 
 def kaggle_sintetico(inicio="2017-03-01", fin="2017-07-31", tiendas=(1, 2, 3, 4, 5), semilla=0):
-    """Datos con la forma de los CSV de Kaggle. La tienda 5 abre el 2017-06-20."""
+    """Datos con la forma de los CSV de Kaggle. La tienda 5 abre el 2017-06-20: como en Kaggle,
+    antes de abrir tiene filas de ventas en cero, sin promociones ni transacciones."""
     rng = np.random.default_rng(semilla)
     fechas = pd.date_range(inicio, fin)
     fechas = fechas[~((fechas.month == 12) & (fechas.day == 25))]
@@ -15,8 +16,9 @@ def kaggle_sintetico(inicio="2017-03-01", fin="2017-07-31", tiendas=(1, 2, 3, 4,
         columns=["date", "store_nbr", "family"],
     )
     train["sales"] = rng.integers(0, 500, len(train)).astype(float)
-    train.loc[(train["store_nbr"] == 5) & (train["date"] < "2017-06-20"), "sales"] = 0.0
     train["onpromotion"] = rng.integers(0, 3, len(train))
+    cerrada = (train["store_nbr"] == 5) & (train["date"] < "2017-06-20")
+    train.loc[cerrada, ["sales", "onpromotion"]] = 0
     habiles = fechas[fechas.day_of_week < 5]
     return {
         "train": train,
@@ -31,7 +33,8 @@ def kaggle_sintetico(inicio="2017-03-01", fin="2017-07-31", tiendas=(1, 2, 3, 4,
         }),
         "oil": pd.DataFrame({"date": habiles, "dcoilwtico": rng.uniform(40, 55, len(habiles))}),
         "transactions": pd.DataFrame(
-            [(f, t, int(rng.integers(500, 3000))) for f in fechas for t in tiendas],
+            [(f, t, int(rng.integers(500, 3000))) for f in fechas for t in tiendas
+             if t != 5 or f >= pd.Timestamp("2017-06-20")],
             columns=["date", "store_nbr", "transactions"],
         ),
     }
