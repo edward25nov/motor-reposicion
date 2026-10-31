@@ -1,0 +1,40 @@
+# Sistema de origen simulado: cómo se parten los CSV de Kaggle en carga histórica y bandeja.
+# Cada valor está justificado en DECISIONES.md (D5 a D8).
+
+semilla: 42
+
+# Todo lo que llega antes de esta fecha forma la carga histórica; desde aquí, la bandeja.
+inicio_bandeja: "2017-06-01"
+
+fuentes:
+  ventas:
+    atraso_dias: 1          # las ventas de D llegan en D+1
+  promociones:
+    anticipacion_dias: 16   # las promociones de D se conocen en D-16 (calendario comercial)
+  transacciones:
+    atraso_dias: 3          # fuente lenta: las transacciones de D llegan en D+3
+  petroleo:
+    atraso_dias: 1          # solo días hábiles; fines de semana sin archivo
+  feriados:
+    meses_anticipacion: 1   # el calendario del mes M se publica el día 1 del mes M-1
+  tiendas:
+    aviso_dias: 7           # una tienda nueva se anuncia 7 días antes de su primera venta
+
+# Incidentes que simulan la operación real. Solo afectan a la bandeja, nunca a la carga histórica.
+# Probabilidades por archivo; cada archivo de ventas recibe a lo sumo un incidente.
+incidentes:
+  correccion:
+    fuentes: [ventas]
+    probabilidad: 0.10
+    dias_hasta_correccion: [3, 7]   # la versión correcta llega entre 3 y 7 días después
+    fraccion_filas: 0.05            # en la variante "valores", filas con venta alterada
+    tiendas_faltantes: 3            # en la variante "parcial", tiendas que no vienen
+  invalido:
+    fuentes: [ventas]
+    probabilidad: 0.04
+    dias_hasta_reenvio: [1, 2]      # el origen reenvía el archivo válido 1 o 2 días después
+    fraccion_filas: 0.01            # filas negativas o duplicadas
+  atraso:
+    fuentes: [ventas, transacciones]
+    probabilidad: 0.05
+    dias_extra: [1, 3]

@@ -41,4 +41,16 @@ dvc remote modify origin --local password <token-dagshub>
 dvc pull
 ```
 
+## Sistema de origen simulado
+
+A partir de los CSV de Kaggle se construyen la carga histórica inicial y la bandeja que simula el
+sistema de origen (un archivo por fuente y fecha, con atrasos, correcciones y archivos inválidos):
+
+```bash
+make origen
+```
+
+El resultado queda en `origen/historico/` y `origen/bandeja/llegada=<AAAA-MM-DD>/`. Los parámetros
+están en `configs/bandeja.yaml` y las decisiones detrás de ellos en `DECISIONES.md` (D4 a D8).
+
 Las instrucciones para levantar y ejecutar el producto se agregarán en este archivo.
