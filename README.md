@@ -53,4 +53,18 @@ make origen
 El resultado queda en `origen/historico/` y `origen/bandeja/llegada=<AAAA-MM-DD>/`. Los parámetros
 están en `configs/bandeja.yaml` y las decisiones detrás de ellos en `DECISIONES.md` (D4 a D8).
 
+## Ingesta y validación
+
+La ingesta lee la bandeja hasta una fecha de corte, valida cada archivo y deja en cuarentena los
+inválidos (sin hacer fallar el proceso):
+
+```bash
+make ingesta CORTE=2017-07-15
+```
+
+El resultado queda en `data/ingesta/`: copia de lo recibido, datos validados, el registro
+`registro.db` con el estado y tipo de cada archivo (nuevo, corrección, reenvío, repetido) y un
+reporte por corte en `reportes/<corte>.json`. Las reglas de validación están en `DECISIONES.md`
+(D9 a D13).
+
 Las instrucciones para levantar y ejecutar el producto se agregarán en este archivo.

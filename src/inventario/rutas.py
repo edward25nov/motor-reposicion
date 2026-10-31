@@ -24,5 +24,13 @@ def kaggle() -> Path:
 
 
 def origen() -> Path:
-    """Sistema de origen simulado: carga histórica y bandeja (generado, no versionado en Git)."""
-    return raiz() / "origen"
+    """Sistema de origen simulado: carga histórica y bandeja (generado, no versionado en Git).
+
+    En Airflow se monta aparte y en solo lectura; su ruta se indica con MOTOR_ORIGEN.
+    """
+    return Path(os.environ.get("MOTOR_ORIGEN", raiz() / "origen"))
+
+
+def ingesta() -> Path:
+    """Copia inmutable de lo recibido, datos validados y registro de la ingesta."""
+    return raiz() / "data" / "ingesta"
