@@ -342,3 +342,16 @@ de negocio, en `configs/negocio.yaml`. `make backtest SNAPSHOT=…` compara los 
   cortes reservados más su horizonte); con un reentrenamiento periódico ese atraso no crece. Con
   los datos reales, el primer entrenamiento (S = 2017-06-05) dejó al baseline como vigente inicial
   y promovió al GBM: 19.0 % menos costo, ganó los 4 cortes, cobertura 86.1 %.
+- **Medición del costo de no reentrenar:** se comparó el mismo GBM entrenado hasta el 2017-04-23
+  (como queda con esta decisión) contra uno reentrenado con todo lo conocido al 2017-06-05, en los
+  9 cortes del 2017-06-05 al 2017-07-31, que ninguno vio:
+
+| Opción | WAPE | RMSLE | Cobertura P10–P90 | Costo de negocio |
+|---|---|---|---|---|
+| Sin reentrenar (esta decisión) | 0.125 | 0.397 | 89.2 % | 2,301,064 |
+| Reentrenado con los cortes reservados | 0.128 | 0.396 | 90.8 % | 2,269,277 |
+| Baseline (referencia) | 0.138 | 0.448 | 84.4 % | 2,706,210 |
+
+  Reentrenar baja el costo solo 1.4 %, gana 5 de 9 cortes y empeora levemente el WAPE: con la regla
+  de D23 (mejora mínima de 2 %) ni siquiera calificaría como mejor. La trazabilidad vale más que
+  esa diferencia. Para que el atraso no crezca, el reentrenamiento se programa cada 4 semanas.
