@@ -171,3 +171,75 @@ La ingesta (`src/inventario/ingesta/`, `make ingesta CORTE=AAAA-MM-DD`) lleva la
   obtienen siempre los mismos datos, aunque después lleguen correcciones. Así un pronóstico pasado
   se puede reproducir con lo que se sabía entonces, y una corrección cuenta solo desde el día en que
   llegó.
+
+## Preparación de datos para el modelo
+
+La preparación (`src/inventario/preparacion/`, `make preparar CORTE=AAAA-MM-DD`) arma, para una
+fecha de corte, la tabla de features con una fila por serie (tienda, familia) y día del horizonte.
+Los parámetros están en `configs/preparacion.yaml`.
+
+### D14. Corte semanal los lunes y horizonte de 14 días
+- **Decisión:** el pronóstico y el pedido se emiten cada lunes (fecha de corte T) y cubren de T+1 a
+  T+14.
+- **Alternativas:** corte diario; horizonte de 7 o de 16 días.
+- **Justificación:** el contexto pide una sugerencia semanal. El lunes ya están las ventas del fin
+  de semana (llegan en D+1). 14 días cubren la semana de pedido más el tiempo de entrega y dejan
+  medir el desempeño a una y dos semanas; con 16 días las promociones del último día del horizonte
+  llegarían justo el día del corte, sin margen ante un atraso.
+
+### D15. La disponibilidad esperada de cada fuente es configuración del producto *(disponibilidad en el tiempo)*
+- **Decisión:** `configs/preparacion.yaml` define cuándo espera el producto cada fuente (ventas
+  T−1, transacciones T−3, petróleo T−1, promociones hasta T+16, feriados del mes siguiente). Una
+  fecha D de una fuente con atraso k solo se usa en el corte T si D ≤ T − k, aunque el archivo
+  haya llegado antes.
+- **Alternativas:** usar todo lo que haya llegado; leer los atrasos de `configs/bandeja.yaml`.
+- **Justificación:** el simulador y el producto son sistemas distintos: en una empresa real el
+  producto no conoce las reglas internas del origen, solo los atrasos acordados. Aplicar el atraso
+  esperado además de la lectura as-of hace que una fuente que a veces llega antes no cambie las
+  features según el día, y permite aplicar exactamente las mismas reglas a los cortes del pasado
+  para entrenar (D18).
+
+### D16. Features directas por horizonte, sin pronóstico recursivo
+- **Decisión:** cada fila describe una serie en el corte T y un día objetivo T+h. Las variables de
+  historia se calculan sobre log(1 + ventas) hasta T−1: medias de 7, 14, 28 y 56 días, último
+  valor, tendencia (media 7 − media 28), proporción de ceros en 28 días, cobertura de la última
+  semana, días con ventas y media del mismo día de la semana del objetivo en las últimas 4 y 8
+  semanas. Del día objetivo: h, día de la semana, día del mes, mes, quincena (día 15 o fin de mes,
+  días de pago en Ecuador), promociones planificadas y feriados. De la tienda: ciudad, provincia,
+  tipo y cluster; además la media de transacciones de 28 días y el precio del petróleo con su
+  cambio a 28 días.
+- **Feriados (reglas de Kaggle):** un Holiday con `transferred=True` no se celebra ese día; sí el
+  registro Transfer. Holiday, Transfer, Additional y Bridge son días libres; Work Day es un fin de
+  semana que se trabaja; Event son fechas comerciales. National aplica a todas las tiendas,
+  Regional a las de la provincia y Local a las de la ciudad.
+- **Alternativas:** un modelo que pronostique un día y use su propio pronóstico como entrada para
+  el siguiente (recursivo); un modelo por horizonte.
+- **Justificación:** un único modelo global con h como variable usa solo datos reales observados,
+  no acumula errores de un día al siguiente y entrena una sola vez. Trabajar en logaritmo reduce el
+  peso de las series grandes y la asimetría de las ventas.
+
+### D17. Datos faltantes al corte: seguir si es posible, detenerse si las ventas están muy atrasadas *(validación de datos)*
+- **Decisión:** las medias ignoran los días sin dato (por un archivo atrasado o en cuarentena) y la
+  tabla registra `cobertura_7`. El reporte `data/procesados/calidad/corte=T.json` lista los días sin
+  ventas de la última semana. Si la última venta disponible es anterior a T − 1 − 3 días, la
+  preparación falla con `DatosInsuficientes` y no se pronostica.
+- **Alternativas:** no pronosticar si falta cualquier día; rellenar con ceros.
+- **Justificación:** que falte un día por un atraso o un reenvío es una situación esperada del
+  negocio y no debe impedir el pedido semanal; rellenar con ceros simularía una caída de ventas
+  que no ocurrió. Pero sin ventas de casi una semana el pedido se basaría en información vieja:
+  es preferible fallar de forma visible (Airflow reintenta y alerta) que publicar una
+  recomendación poco confiable. Con la bandeja simulada esto ocurre, por ejemplo, en el corte
+  2017-07-03: falta el 1 de julio (archivo en cuarentena) y la preparación sigue.
+
+### D18. Entrenamiento con cortes del pasado sobre una sola vista de los datos *(disponibilidad en el tiempo)*
+- **Decisión:** `preparar.entrenamiento(snapshot, desde, hasta)` lee los datos conocidos en
+  `snapshot` y calcula las features de cada lunes entre `desde` y `hasta` con las reglas de D15. Solo
+  se incluyen filas cuyo objetivo ya se conocía en `snapshot`.
+- **Alternativas:** guardar y releer las features de cada corte tal como se emitieron.
+- **Justificación:** ninguna fila ve ventas posteriores a su corte, y el modelo se entrena con lo
+  que se sabía en `snapshot`, nunca con datos que llegaron después. La única aproximación es que,
+  dentro de la historia, se usa la versión ya corregida de un dato aunque en aquel corte del pasado
+  todavía no se conociera la corrección; para entrenar es preferible la mejor versión conocida. Los
+  pronósticos publicados, en cambio, se calculan siempre con la vista estricta del corte (D13).
+- **Tiendas nuevas:** una tienda sin historia aparece con las variables de historia vacías; el
+  modelo y el baseline deben poder pronosticarla con las variables de la tienda y del calendario.
