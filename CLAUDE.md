@@ -5,20 +5,24 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 
 ## Comandos
 - `make test`: ejecuta las pruebas.
-- Sin make: `PYTHONPATH=src python -m pytest -q`.
+- `make origen`: construye la carga histórica y la bandeja en `origen/` a partir de `data/raw/kaggle/`.
+- Sin make: `PYTHONPATH=src python -m pytest -q` y `PYTHONPATH=src python -m inventario.origen.generar`.
 
 ## Estructura
-- `src/inventario/`: toda la lógica, en módulos de Python con pruebas.
+- `src/inventario/`: toda la lógica, en módulos de Python con pruebas. Las rutas salen de `rutas.py` (la raíz se cambia con `MOTOR_RAIZ`, lo usan las pruebas).
+- `src/inventario/origen/`: sistema de origen simulado (carga histórica + bandeja) construido desde Kaggle.
+- `origen/`: generado por `make origen`, no se versiona en Git. `bandeja/llegada=<AAAA-MM-DD>/<fuente>_<clave>.csv`: la carpeta es el día en que el archivo está disponible.
 - `dags/`: DAGs de Airflow 3. Solo orquestan: llaman funciones de `src/inventario/`.
 - `configs/`: configuración versionada (costos de negocio, modelo, fuentes).
 - `docker/`: Airflow 3 con Docker Compose.
 - `tests/`: pruebas con pytest; corren en cada Pull Request (GitHub Actions).
-- `DECISIONES.md`: decisiones técnicas y de producto, con alternativas y justificación.
+- `DECISIONES.md`: decisiones técnicas y de producto, con alternativas y justificación. **Toda decisión nueva se agrega ahí** (numerada D1, D2, ...) en el mismo Pull Request que la implementa.
 
 ## Reglas de disponibilidad de la información
 - Toda predicción se construye solo con la información disponible en el momento en que se emite (fecha de corte).
 - La disponibilidad se mide por la llegada del archivo a la bandeja, no por la fecha de los datos que contiene.
 - La bandeja es un sistema externo: se lee, nunca se modifica (se monta en solo lectura).
+- `origen/incidentes_simulados.csv` es la hoja de respuestas de la simulación: el flujo nunca la lee; solo la usan las pruebas y la evidencia.
 - Los pronósticos publicados son inmutables; una corrección de datos reprocesa la preparación y el seguimiento, no la publicación.
 - La validación temporal usa los mismos cortes para todos los modelos comparados; nunca split aleatorio.
 
