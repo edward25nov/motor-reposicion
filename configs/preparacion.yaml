@@ -1,0 +1,20 @@
+# Preparación de los datos para el modelo. Decisiones en DECISIONES.md (D14 a D18).
+
+corte:
+  dia_semana: 0           # 0 = lunes: cada lunes se emite el pronóstico y el pedido
+  horizonte_dias: 14      # se pronostica de T+1 a T+14
+
+# Cuándo espera el producto cada fuente en operación (conocimiento del negocio, no del simulador).
+# Una fecha D de una fuente con atraso k se usa en el corte T solo si D <= T - k.
+disponibilidad:
+  ventas_atraso: 1
+  transacciones_atraso: 3
+  petroleo_atraso: 1
+  promociones_anticipacion: 16
+  feriados_meses_anticipacion: 1
+  # Si la última venta disponible es más vieja que T - ventas_atraso - tolerancia, no se pronostica.
+  tolerancia_atraso_ventas: 3
+
+features:
+  ventanas_dias: [7, 14, 28, 56]   # medias móviles de log(1 + ventas)
+  semanas_mismo_dia: [4, 8]        # media del mismo día de la semana del día objetivo
