@@ -15,7 +15,8 @@ def raiz() -> Path:
 
 
 def configs() -> Path:
-    return raiz() / "configs"
+    """La configuración es parte del código: viene del repositorio, no de MOTOR_RAIZ."""
+    return Path(os.environ.get("MOTOR_CONFIGS", _RAIZ_POR_DEFECTO / "configs"))
 
 
 def kaggle() -> Path:
