@@ -35,3 +35,13 @@ def origen() -> Path:
 def ingesta() -> Path:
     """Copia inmutable de lo recibido, datos validados y registro de la ingesta."""
     return raiz() / "data" / "ingesta"
+
+
+def modelos() -> Path:
+    """Modelos entrenados y su registro (versionados con DVC, no con Git)."""
+    return raiz() / "models"
+
+
+def reportes() -> Path:
+    """Comparaciones de modelos, seguimiento y otras salidas para revisar."""
+    return raiz() / "data" / "reportes"
