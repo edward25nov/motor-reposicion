@@ -109,3 +109,65 @@ el sistema de origen. Lo hace `src/inventario/origen/` (`make origen`), con los 
 - **Justificación:** reproducibilidad (cualquiera obtiene la misma bandeja) y que ejecutarlo dos veces
   dé el mismo resultado que una. `origen/` no se versiona en Git porque se reconstruye desde Kaggle y
   `configs/bandeja.yaml`.
+
+## Ingesta y validación
+
+La ingesta (`src/inventario/ingesta/`, `make ingesta CORTE=AAAA-MM-DD`) lleva la bandeja a
+`data/ingesta/`: copia inmutable de lo recibido (`recibidos/`), datos validados en Parquet
+(`validos/`), un registro SQLite de cada archivo (`registro.db`) y un reporte por corte (`reportes/`).
+
+### D9. La ingesta procesa todo lo pendiente hasta el corte, no solo lo del día *(disponibilidad en el tiempo)*
+- **Decisión:** para el corte T se procesan, en orden de llegada, todos los archivos con
+  `llegada ≤ T` que no estén registrados con el mismo contenido (hash MD5).
+- **Alternativas:** procesar solo la carpeta `llegada=T`.
+- **Justificación:** si un día no corre (caída, backfill parcial), el siguiente se pone al día solo.
+  Procesar en orden de llegada hace que la clasificación de cada archivo (nuevo, corrección…) sea
+  la misma corriendo día por día que de una sola vez; hay una prueba que lo verifica. Un archivo ya
+  registrado con el mismo hash se salta: la ingesta es idempotente.
+
+### D10. Errores contra advertencias *(validación de datos)*
+- **Decisión:** un archivo va a **cuarentena** (no se usa nunca) si: le faltan columnas, está vacío
+  o no se puede leer, tiene valores con tipo inválido o nulos en columnas obligatorias, ventas,
+  promociones o transacciones negativas, filas duplicadas por su llave, fechas que no corresponden
+  a su clave, ventas o transacciones de una tienda no anunciada, o familias desconocidas.
+  Son **advertencias** (el archivo se usa): precio del petróleo nulo, tiendas que no reportan ese
+  día, columnas de más, filas de tiendas aún no anunciadas sin actividad (se descartan) y
+  promociones de una tienda aún no anunciada (se descartan esas filas).
+- **Alternativas:** rechazar solo las filas malas y usar el resto del archivo; validar con una
+  librería como pandera.
+- **Justificación:** un archivo con negativos o duplicados indica un problema del proceso que lo
+  generó; usar "lo que se salve" mezclaría datos de una versión defectuosa con datos buenos. Se
+  rechaza completo y se espera el reenvío. Las advertencias corresponden a situaciones normales del
+  negocio (en Kaggle, el petróleo no tiene precio algunos días y las tiendas tienen filas en cero
+  antes de abrir) y por el enunciado no deben provocar fallas. Una promoción es un plan: que nombre
+  una tienda que aún no existe no invalida las promociones de las demás. Las reglas son pocas y
+  explícitas, así que una función propia con pruebas es más clara que una dependencia nueva.
+
+### D11. Un archivo inválido no hace fallar la ingesta; una carga histórica inválida sí *(validación de datos)*
+- **Decisión:** un archivo inválido de la bandeja queda en cuarentena, se reporta y la tarea
+  termina bien. Si la carga histórica es inválida, la ingesta falla.
+- **Alternativas:** fallar la tarea ante cualquier archivo inválido.
+- **Justificación:** la cuarentena ya cumple "detenerse antes de contaminar"; fallar la tarea
+  bloquearía también los archivos válidos del mismo día y obligaría a intervenir a mano, cuando lo
+  normal es que el origen reenvíe el archivo. Sin carga histórica válida no hay con qué pronosticar:
+  ahí sí hay que detenerse. Si falta un dato necesario para pronosticar se decide en la preparación
+  de datos, no en la ingesta.
+
+### D12. Tipos de llegada y detección de correcciones *(manejo de correcciones)*
+- **Decisión:** cada archivo se registra con un tipo, comparando con sus versiones anteriores
+  (misma fuente y clave, llegada anterior): `nuevo` (primera vez), `reenvio` (antes solo hubo
+  versiones en cuarentena), `correccion` (ya había una versión válida con otro contenido) o
+  `repetido` (mismo contenido que la última válida). Las correcciones se consultan con
+  `registro.correcciones(desde, hasta)` para reprocesar lo que dependía del dato corregido.
+- **Justificación:** distinguir un reenvío de una corrección importa: un reenvío trae un dato que
+  nunca se usó, una corrección cambia un dato que ya pudo alimentar un pronóstico publicado y el
+  seguimiento del desempeño.
+
+### D13. Lectura "as-of" desde el registro *(disponibilidad en el tiempo y manejo de correcciones)*
+- **Decisión:** `vigente.leer(fuente, corte)` devuelve la carga histórica más, para cada clave de la
+  bandeja, la versión válida de llegada más reciente con `llegada ≤ corte`. Todo lo que se use para
+  pronosticar en T se lee así.
+- **Justificación:** garantiza el principio fundamental por construcción: con el mismo corte se
+  obtienen siempre los mismos datos, aunque después lleguen correcciones. Así un pronóstico pasado
+  se puede reproducir con lo que se sabía entonces, y una corrección cuenta solo desde el día en que
+  llegó.
