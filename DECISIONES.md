@@ -468,16 +468,15 @@ fecha lógica.
 - **Decisión:** todas las tareas usan `depends_on_past=True` (un corte espera al anterior) y el
   periodo se ejecuta con `airflow backfill create --reprocess-behavior failed` (corre las fechas
   pendientes y reintenta las fallidas, sin rehacer las exitosas). `make operar` crea primero los
-  backfills y después activa los DAGs. `MOTOR_FIN_OPERACION` (2017-08-15, fin de los datos) es el
-  `end_date` de los DAGs. Además, el modelo que usa un corte T es el vigente "as-of": la última
-  versión aprobada con snapshot ≤ T (`registro.vigente_al`).
+  backfills y después activa los DAGs. Además, el modelo que usa un corte T es el vigente "as-of":
+  la última versión aprobada con snapshot ≤ T (`registro.vigente_al`).
 - **Alternativas:** `catchup=True`; confiar en que el backfill siempre corre en orden.
 - **Justificación:** al activar un DAG con `catchup=False`, Airflow crea igual una corrida para la
-  fecha más reciente. Sin `end_date` sería una corrida de 2026 sin datos; sin `depends_on_past`, la
-  corrida del último lunes podría entrenar un modelo antes que la del primero. El modelo "as-of" es
-  la defensa de fondo: aunque algo corra fuera de orden, un pedido de junio nunca se calcula con un
-  modelo entrenado con datos de julio (hay una prueba que lo verifica). Es el principio
-  fundamental del enunciado aplicado también al modelo, no solo a los datos.
+  fecha más reciente; sin `depends_on_past`, esa corrida podría entrenar un modelo antes que las
+  del pasado. El modelo "as-of" es la defensa de fondo: aunque algo corra fuera de orden, un pedido
+  de junio nunca se calcula con un modelo entrenado con datos de julio (hay una prueba que lo
+  verifica). Es el principio fundamental del enunciado aplicado también al modelo, no solo a los
+  datos. Lo que pasa después del fin de los datos se resuelve en D36.
 
 ### D33. Reentrenamiento cada 4 semanas y versionado con DVC dentro del flujo
 - **Decisión:** el DAG semanal entrena un retador si no hay modelo vigente o si pasaron 4 semanas
@@ -504,3 +503,38 @@ fecha lógica.
   afectado (hay una prueba que importa `dill`, guarda un modelo y verifica que el archivo no lo
   menciona). Instalar `dill` en todas partes ocultaría el problema sin resolverlo. El gzip sin
   fecha hace que el mismo modelo produzca siempre el mismo archivo y el mismo MD5 en el manifest.
+
+### D35. Seguimiento del desempeño con las ventas conocidas a la fecha *(manejo de correcciones)*
+- **Decisión:** el DAG diario `seguimiento_desempeno` (y `make seguimiento FECHA=…`) compara cada
+  publicación con corte ≤ T con las ventas tal como se conocen en T, incluidas las correcciones que
+  ya llegaron. Del pronóstico calcula, sobre los días con venta conocida, WAPE, sesgo, RMSLE,
+  pinball, cobertura P10–P90 y costo diario, por corte y por semana del horizonte. El pedido se
+  evalúa cuando hay ventas de **todos** los días de su cobertura (no basta con que haya pasado la
+  fecha: un día atrasado o en cuarentena todavía no se conoce): nivel de servicio, faltante,
+  sobrante y costo, por grupo (perecederos y no perecederos), y contra una regla de referencia que
+  imita al gerente sin modelo: pedir lo vendido la semana anterior al corte. Escribe
+  `data/reportes/seguimiento/al=<T>/` con tres CSV y `reporte.html`.
+- **Alternativas:** evaluar solo una vez, cuando termina el horizonte; comparar solo con el baseline.
+- **Justificación:** el contexto pide informar "qué tan acertadas fueron las sugerencias
+  anteriores" a medida que se conocen las ventas, así que la evaluación se actualiza cada día y
+  cambia si llega una corrección (los pronósticos publicados no cambian; su evaluación sí). La
+  regla de referencia responde la pregunta de negocio: ¿el sistema ordena mejor que la práctica
+  actual? Como cada reporte depende solo de lo publicado hasta T y de los datos conocidos en T, es
+  reproducible.
+
+### D36. El fin de la operación simulada se detecta por los datos, no por fechas fijas
+- **Decisión:** cada DAG empieza con una tarea `en_operacion` (`@task.short_circuit`). La ingesta y
+  el seguimiento se omiten si la fecha es posterior a la última llegada de la bandeja; el pronóstico
+  se omite si el origen nunca llegó a tener ventas lo bastante recientes para el corte
+  (`operacion.hay_ventas_para_corte`). Una corrida omitida termina en *skipped*, no en error. Dentro
+  del periodo, si faltan ventas que sí debían llegar, la preparación sigue fallando con
+  `DatosInsuficientes` (D17).
+- **Alternativas:** `end_date` fijo en los DAGs, leído de una variable de entorno.
+- **Justificación:** se probó primero con `end_date` por variable de entorno y falló de dos formas
+  observadas: el backfill de Airflow ignora el `end_date` (creó el corte del 2017-08-21, sin ventas)
+  y, al recrear los contenedores, hubo un momento en que el DAG ya leía una variable que el
+  contenedor aún no tenía, quedó sin `end_date` y Airflow programó una corrida con fecha
+  2026-10-26 que intentó entrenar. La guarda por datos no depende de la configuración ni de cómo se
+  dispare la corrida (backfill, programada o manual) y sirve para cualquier periodo que se ejecute.
+  Distingue "ya no hay más datos en el origen" (se omite) de "faltan datos que debían llegar" (se
+  alerta). En producción la bandeja no termina y la guarda no omitiría nada.

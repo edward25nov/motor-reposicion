@@ -1,7 +1,7 @@
 PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python)
 export PYTHONPATH := src
 
-.PHONY: test origen ingesta preparar backtest entrenar publicar reproducir airflow-up airflow-down operar
+.PHONY: test origen ingesta preparar backtest entrenar publicar reproducir seguimiento airflow-up airflow-down operar
 
 test:
 	$(PYTHON) -m pytest -q
@@ -33,10 +33,14 @@ publicar:
 reproducir:
 	$(PYTHON) -m inventario.publicacion.reproducir $(CORTE)
 
+# Compara lo publicado con las ventas conocidas a la fecha: make seguimiento FECHA=2017-08-22
+seguimiento:
+	$(PYTHON) -m inventario.seguimiento.seguimiento $(FECHA)
+
 # --- Airflow (Docker Compose) ---------------------------------------------------------------
 COMPOSE := docker compose -f airflow/docker-compose.yaml
 DESDE ?= 2017-06-01
-HASTA ?= 2017-08-14
+HASTA ?= 2017-08-22
 
 # Construye la imagen, genera el origen desde data/raw/kaggle/ y levanta Airflow en localhost:8081.
 airflow-up:
@@ -46,12 +50,15 @@ airflow-up:
 airflow-down:
 	$(COMPOSE) down
 
-# Ejecuta el periodo DESDE..HASTA con backfill: make operar DESDE=2017-06-01 HASTA=2017-08-14
+# Ejecuta el periodo DESDE..HASTA con backfill: make operar DESDE=2017-06-01 HASTA=2017-08-22
 # Primero crea las corridas y después activa los DAGs: así ninguna corrida programada se adelanta.
 operar:
 	$(COMPOSE) exec airflow-scheduler airflow backfill create --dag-id ingesta_validacion \
 		--from-date $(DESDE) --to-date $(HASTA) --max-active-runs 1 --reprocess-behavior failed
 	$(COMPOSE) exec airflow-scheduler airflow backfill create --dag-id pronostico_pedido \
 		--from-date $(DESDE) --to-date $(HASTA) --max-active-runs 1 --reprocess-behavior failed
+	$(COMPOSE) exec airflow-scheduler airflow backfill create --dag-id seguimiento_desempeno \
+		--from-date $(DESDE) --to-date $(HASTA) --max-active-runs 1 --reprocess-behavior failed
 	$(COMPOSE) exec airflow-scheduler airflow dags unpause ingesta_validacion
 	$(COMPOSE) exec airflow-scheduler airflow dags unpause pronostico_pedido
+	$(COMPOSE) exec airflow-scheduler airflow dags unpause seguimiento_desempeno

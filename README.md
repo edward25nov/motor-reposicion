@@ -19,21 +19,23 @@ Docker.
    ```
 
 3. Ejecutar la operación sobre un periodo con backfill (por defecto, del 2017-06-01 al
-   2017-08-14):
+   2017-08-22, todo el periodo de la bandeja):
 
    ```bash
-   make operar DESDE=2017-06-01 HASTA=2017-08-14
+   make operar DESDE=2017-06-01 HASTA=2017-08-22
    ```
 
-   Corre el DAG diario `ingesta_validacion` y el semanal `pronostico_pedido` (cada lunes: pone al
-   día la ingesta, entrena un retador cada 4 semanas, prepara los datos, publica el pronóstico y el
-   pedido y los versiona con DVC). Cada corte espera al anterior. El avance se ve en la vista
-   *Grid* de cada DAG.
+   Corre tres DAGs: `ingesta_validacion` (diario), `pronostico_pedido` (cada lunes: pone al día
+   la ingesta, entrena un retador cada 4 semanas, prepara los datos, publica el pronóstico y el
+   pedido y los versiona con DVC) y `seguimiento_desempeno` (diario: compara lo publicado con las
+   ventas reales). Cada fecha espera a la anterior. Las fechas sin datos en el origen terminan como
+   omitidas (*skipped*), no como error. El avance se ve en la vista *Grid* de cada DAG.
 
 4. Detener: `make airflow-down` (conserva la base de metadatos de Airflow).
 
 Los resultados quedan en el repositorio: `data/ingesta/` (registro y cuarentena),
-`data/procesados/`, `models/` y `data/publicado/corte=<fecha>/`.
+`data/procesados/`, `models/`, `data/publicado/corte=<fecha>/` y el seguimiento en
+`data/reportes/seguimiento/al=<fecha>/reporte.html`.
 
 En Linux, `make airflow-up` crea `airflow/.env` con tu usuario (`AIRFLOW_UID`) para que los
 contenedores puedan escribir en `data/`. Los nombres del proyecto Compose (`motor-reposicion`), la
@@ -137,6 +139,18 @@ Cada corte se publica una sola vez en `data/publicado/corte=<fecha>/`: `pronosti
 (cuantiles P10 a P95 por tienda, familia y día), `pedido.csv` (cantidad sugerida por tienda y
 familia para la semana de miércoles a martes) y `manifest.json` (commit, modelo, configuración y
 huella de los datos usados). Decisiones en `DECISIONES.md` (D25 a D28).
+
+## Seguimiento del desempeño
+
+```bash
+make seguimiento FECHA=2017-08-22
+```
+
+Compara cada pronóstico y pedido publicado con las ventas conocidas a esa fecha (incluidas las
+correcciones) y escribe `data/reportes/seguimiento/al=<fecha>/`: `pronostico_por_corte.csv`,
+`pronostico_por_semana.csv`, `pedido_por_corte.csv` y `reporte.html`. El pedido se compara también
+con una regla de referencia (pedir lo vendido la semana anterior). Decisiones en `DECISIONES.md`
+(D35 y D36).
 
 ## Comandos sin Docker
 
