@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 
 from inventario import config, operacion
@@ -55,3 +56,25 @@ def test_un_corte_no_usa_un_modelo_entrenado_despues(tmp_path, monkeypatch, dato
     preparar.ejecutar("2017-07-17")
     with pytest.raises(RuntimeError, match="No hay modelo vigente al 2017-07-17"):
         publicar.ejecutar("2017-07-17")
+
+
+@pytest.fixture
+def origen(tmp_path, monkeypatch, datos, cfg):
+    monkeypatch.setenv("MOTOR_RAIZ", str(tmp_path))
+    monkeypatch.delenv("MOTOR_ORIGEN", raising=False)
+    return generar(datos, cfg, tmp_path / "origen")
+
+
+def test_fuera_de_la_bandeja_se_omite(origen):
+    ultima = origen["ultima_llegada"]
+    assert operacion.hay_bandeja(ultima)
+    assert not operacion.hay_bandeja((pd.Timestamp(ultima) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+    assert not operacion.hay_bandeja("2026-10-26")
+
+
+def test_corte_sin_ventas_en_el_origen_se_omite(origen):
+    # Las ventas sintéticas terminan el 2017-07-31; con atraso 1 y tolerancia 3 el último corte es el 08-04.
+    assert operacion.hay_ventas_para_corte("2017-07-31")
+    assert operacion.hay_ventas_para_corte("2017-08-04")
+    assert not operacion.hay_ventas_para_corte("2017-08-07")
+    assert not operacion.hay_ventas_para_corte("2026-10-26")
