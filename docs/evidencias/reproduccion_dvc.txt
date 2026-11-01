@@ -1,0 +1,51 @@
+$ git clone https://github.com/edward25nov/motor-reposicion.git && cd motor-reposicion
+$ git log --oneline -1 75e1005
+75e1005 chore: fija con dvc los resultados de la corrida completa
+
+# 1. Qué código y qué datos produjeron la publicación del corte 2017-07-03
+$ git show 75e1005:data/publicado.dvc
+outs:
+- md5: 3e052fbd6f9cc21627db7204a6f9c9bc.dir
+  size: 14892496
+  nfiles: 33
+  hash: md5
+  path: publicado
+$ dvc pull data/publicado.dvc && python -c "import json; m = json.load(open(\"data/publicado/corte=2017-07-03/manifest.json\")); print(m[\"git_commit\"], m[\"modelo\"], m[\"datos\"])"
+085d363fb973c238ace04523e694a12206f113c0 {'version': 'gbm-2017-07-03', 'md5': '1a8457911a9e9bd431bd3ec4a053c529'} {'hash': '6e9ab3246708140dae0fde34ed85a70d', 'archivos': 129, 'ultima_llegada': '2017-07-03'}
+
+# 2. Volver al código de ese commit y traer los datos y modelos de su versión
+$ git checkout 085d363
+085d363 Merge pull request #9 from edward25nov/feat/seguimiento
+$ git checkout 75e1005 -- data/ingesta.dvc models.dvc data/publicado.dvc
+$ dvc pull data/ingesta.dvc models.dvc data/publicado.dvc
+A       models/
+678 files fetched and 676 files added
+
+# 3. Reproducir el pronóstico y el pedido publicados
+$ make reproducir CORTE=2017-07-03
+{
+  "corte": "2017-07-03",
+  "modelo": "gbm-2017-07-03",
+  "misma_huella_de_datos": true,
+  "filas_iguales": true,
+  "max_dif_pronostico": 3.637978807091713e-12,
+  "pedidos_distintos": 0,
+  "unidades_publicadas": 6589843.0,
+  "unidades_reproducidas": 6589843.0,
+  "reproducido": true
+}
+(código de salida: 0)
+
+$ make reproducir CORTE=2017-08-14
+{
+  "corte": "2017-08-14",
+  "modelo": "gbm-2017-07-03",
+  "misma_huella_de_datos": true,
+  "filas_iguales": true,
+  "max_dif_pronostico": 1.8189894035458565e-12,
+  "pedidos_distintos": 0,
+  "unidades_publicadas": 6226433.0,
+  "unidades_reproducidas": 6226433.0,
+  "reproducido": true
+}
+(código de salida: 0)
