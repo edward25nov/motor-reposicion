@@ -7,7 +7,8 @@
 # La proporción crítica costo_faltante / (costo_faltante + costo_sobrante) es el cuantil de la
 # demanda que conviene cubrir.
 
-por_defecto:                 # no perecederos
+por_defecto:
+  nombre: no perecederos
   costo_faltante: 0.30
   costo_sobrante: 0.05       # proporción crítica 0.86
 

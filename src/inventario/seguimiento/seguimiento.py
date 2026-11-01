@@ -9,13 +9,14 @@ Para una fecha T toma todas las publicaciones con corte <= T y las ventas tal co
   (pedir lo vendido la semana anterior), separado en perecederos y no perecederos.
 
 Escribe en data/reportes/seguimiento/al=<T>/: pronostico_por_corte.csv,
-pronostico_por_semana.csv, pedido_por_corte.csv y reporte.html. Es idempotente y reproducible: el
+pronostico_por_semana.csv, pedido_por_corte.csv, cortes_sin_publicacion.csv y reporte.html. Es idempotente y reproducible: el
 resultado depende solo de lo publicado hasta T y de los datos conocidos en T.
 
 Uso:
     PYTHONPATH=src python -m inventario.seguimiento.seguimiento 2017-08-14
 """
 
+import json
 import sys
 
 import numpy as np
@@ -87,7 +88,7 @@ def pedido(corte: pd.Timestamp, ventas: pd.DataFrame, cfg_n: dict) -> pd.DataFra
               .groupby(LLAVE, as_index=False)["ventas"].sum().rename(columns={"ventas": "referencia"}))
     t = ped.merge(real, on=LLAVE, how="left").merge(previa, on=LLAVE, how="left").fillna({"real": 0.0, "referencia": 0.0})
     costos = negocio.costos(t["family"], cfg_n)
-    t["grupo"] = np.where(costos["proporcion_critica"] < 0.7, "perecederos", "no perecederos")
+    t["grupo"] = negocio.grupo(t["family"], cfg_n).to_numpy()
     for nombre, cantidad in (("pedido", t["cantidad_sugerida"]), ("referencia", t["referencia"])):
         t[f"costo_{nombre}"] = metricas.costo_negocio(t["real"], cantidad.to_numpy(), costos)
     t["cubierto"] = (t["real"] <= t["cantidad_sugerida"]).astype(float)
@@ -106,6 +107,17 @@ def pedido(corte: pd.Timestamp, ventas: pd.DataFrame, cfg_n: dict) -> pd.DataFra
     r = pd.DataFrame(filas)
     r["ahorro_vs_referencia"] = 1 - r["costo_pedido"] / r["costo_referencia"]
     return r
+
+
+def sin_publicacion(hasta: pd.Timestamp) -> pd.DataFrame:
+    """Cortes que no se publicaron (datos insuficientes al corte), con su motivo."""
+    filas = []
+    for ruta in sorted((rutas.raiz() / "data" / "procesados" / "calidad").glob("corte=*.json")):
+        c = json.loads(ruta.read_text(encoding="utf-8"))
+        if pd.Timestamp(c["corte"]) <= hasta and c.get("publicado") is False:
+            filas.append({"corte": c["corte"], "motivo": c["motivo"],
+                          "ultima_venta_disponible": c["ultima_venta_disponible"]})
+    return pd.DataFrame(filas, columns=["corte", "motivo", "ultima_venta_disponible"])
 
 
 def _resumen(d: pd.DataFrame, por: list[str]) -> pd.DataFrame:
@@ -144,14 +156,16 @@ def ejecutar(fecha: str) -> str:
         por_corte = pd.DataFrame(columns=COLUMNAS_PRONOSTICO)
         por_semana = pd.DataFrame(columns=["corte", "semana", *COLUMNAS_PRONOSTICO[1:]])
     por_pedido = pd.concat(pedidos, ignore_index=True) if pedidos else pd.DataFrame(columns=COLUMNAS_PEDIDO)
+    omitidos = sin_publicacion(T)
     for nombre, tabla in (("pronostico_por_corte", por_corte), ("pronostico_por_semana", por_semana),
-                          ("pedido_por_corte", por_pedido)):
+                          ("pedido_por_corte", por_pedido), ("cortes_sin_publicacion", omitidos)):
         tabla.to_csv(destino / f"{nombre}.csv", index=False, date_format="%Y-%m-%d", float_format="%.6g")
     (destino / "reporte.html").write_text(
-        reporte.html(T, por_corte, por_semana, por_pedido, len(correcciones)), encoding="utf-8")
+        reporte.html(T, por_corte, por_semana, por_pedido, len(correcciones), omitidos), encoding="utf-8")
     print(f"seguimiento al {T:%Y-%m-%d}: {len(por_corte)} cortes con ventas conocidas, "
           f"{len(por_pedido[por_pedido['grupo'] == 'total']) if len(por_pedido) else 0} pedidos evaluados, "
-          f"{len(correcciones)} correcciones de ventas incorporadas")
+          f"{len(correcciones)} correcciones de ventas incorporadas, "
+          f"{len(omitidos)} cortes sin publicación")
     return str(destino)
 
 
