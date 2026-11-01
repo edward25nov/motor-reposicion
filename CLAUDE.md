@@ -11,6 +11,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `make publicar CORTE=AAAA-MM-DD` y `make reproducir CORTE=AAAA-MM-DD`: publicación inmutable del pronóstico y pedido, y su reproducción.
 - `make airflow-up` / `make airflow-down`: Airflow 3.3.2 en Docker (http://localhost:8081, airflow/airflow).
 - `make operar DESDE=AAAA-MM-DD HASTA=AAAA-MM-DD`: backfill de los tres DAGs (primero crea las corridas, luego activa los DAGs).
+- `make reiniciar`: borra la base de Airflow y todo lo generado (no toca Kaggle ni origen/).
 - `make seguimiento FECHA=AAAA-MM-DD`: reporte de desempeño de lo publicado con las ventas conocidas a la fecha.
 - `make origen`: construye la carga histórica y la bandeja en `origen/` a partir de `data/raw/kaggle/`.
 - Sin make: `PYTHONPATH=src python -m pytest -q` y `PYTHONPATH=src python -m inventario.origen.generar`.
@@ -54,7 +55,8 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 
 ## Reglas de Airflow
 - Cada tarea usa `logical_date` (`{{ ds }}`), nunca la fecha de hoy.
-- Todas las tareas usan el pool `motor` (1 cupo) y `depends_on_past=True`; el backfill necesita `--reprocess-behavior failed`.
+- Todas las tareas usan el pool `motor` (1 cupo). Solo la ingesta y `entrenar_si_corresponde` usan `depends_on_past=True` (dependen del orden); el resto lee as-of. El backfill necesita `--reprocess-behavior failed`.
+- Datos insuficientes al corte no son un error: `datos_suficientes` omite el corte y deja `publicado: false` con su motivo (D17). No volver a lanzar excepciones ahí: con `depends_on_past` bloquearían los lunes siguientes.
 - Cada DAG empieza con `en_operacion` (`@task.short_circuit`): fuera de los datos del origen se omite. No usar `end_date` (el backfill lo ignora).
 - Un corte T usa el modelo vigente as-of (`registro.vigente_al(T)`), nunca uno con snapshot posterior.
 - El compose fija `OMP_NUM_THREADS=4` y un heartbeat de 1200 s: sin eso el entrenamiento deja sin CPU a Airflow (D37).
@@ -62,7 +64,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - Las versiones de `requirements.txt` están fijadas a las restricciones de Airflow 3.3.2: no cambiarlas sin cambiar la imagen.
 - Las tareas son idempotentes: cada fecha escribe en su propia carpeta y reemplaza su resultado (borrar e insertar en una transacción).
 - XCom solo lleva valores pequeños (rutas, conteos); los datos van a disco.
-- Los datos inválidos detienen el flujo antes de contaminar el resultado; las situaciones esperadas del negocio (feriados, tiendas cerradas, archivos atrasados) no provocan fallas.
+- Los datos inválidos detienen el flujo antes de contaminar el resultado; las situaciones esperadas del negocio (feriados, tiendas cerradas, tiendas o familias nuevas, archivos atrasados) no provocan fallas: son advertencias.
 
 ## Reglas de datos
 - Ningún dato ni modelo se guarda en Git: se versionan con DVC (`dvc add` y `dvc push`).
