@@ -73,6 +73,7 @@ def ejecutar(corte: str) -> str:
     manifest = {
         "corte": corte,
         "git_commit": registro.commit_git(),
+        "git_cambios_sin_commit": registro.cambios_sin_commit(),
         "modelo": {"version": version, "md5": md5(registro.ruta_modelo(version))},
         "datos": entradas,
         "features_md5": md5(features_path),

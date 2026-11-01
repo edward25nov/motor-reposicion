@@ -17,6 +17,12 @@ def cantidad_critica(pred: pd.DataFrame, cuantiles: list[float], proporcion: pd.
     """Interpola, fila por fila, el valor del pronóstico en la proporción crítica de su familia."""
     qs = np.asarray(cuantiles)
     valores = pred[[columna(q) for q in cuantiles]].to_numpy()
+    fuera = sorted(set(proporcion[(proporcion < qs[0]) | (proporcion > qs[-1])].round(3)))
+    if fuera:
+        # El modelo no estima cuantiles fuera de [P10, P95]: más allá de eso el pedido ya no sigue a
+        # los costos. Para cubrir proporciones más extremas hay que agregar cuantiles en modelo.yaml.
+        print(f"ADVERTENCIA: proporción crítica {fuera} fuera de los cuantiles del modelo "
+              f"[{qs[0]}, {qs[-1]}]: se usa el cuantil más cercano")
     p = np.clip(proporcion.to_numpy(), qs[0], qs[-1])
     j = np.clip(np.searchsorted(qs, p, side="right") - 1, 0, len(qs) - 2)
     peso = (p - qs[j]) / (qs[j + 1] - qs[j])

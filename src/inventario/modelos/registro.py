@@ -84,6 +84,21 @@ def vigente(corte) -> tuple[str, object] | None:
     return (version, cargar_modelo(version)) if version else None
 
 
+# Lo que define el resultado: el código y la configuración. Los punteros .dvc los modifica el
+# propio flujo en cada corte (versionar), así que no cuentan como cambios del código.
+CODIGO = ("src", "dags", "configs", "requirements.txt", "airflow/Dockerfile", "airflow/docker-compose.yaml")
+
+
+def cambios_sin_commit(raiz: Path | None = None) -> bool | None:
+    """True si el código o la configuración tienen cambios sin commit; None si no hay Git."""
+    try:
+        salida = subprocess.run(["git", "status", "--porcelain", "--", *CODIGO], cwd=raiz or rutas.raiz(),
+                                capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return bool(salida.stdout.strip()) if salida.returncode == 0 else None
+
+
 def commit_git() -> str:
     try:
         salida = subprocess.run(["git", "rev-parse", "HEAD"], cwd=rutas.raiz(), capture_output=True,
