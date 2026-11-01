@@ -79,4 +79,16 @@ Escribe `data/procesados/features/corte=<fecha>.parquet` (una fila por tienda, f
 horizonte de 14 días) y `data/procesados/calidad/corte=<fecha>.json`. Si las ventas están demasiado
 atrasadas, se detiene con `DatosInsuficientes`. Decisiones en `DECISIONES.md` (D14 a D18).
 
+## Modelos
+
+```bash
+make backtest SNAPSHOT=2017-06-05   # compara baseline y GBM con validación de origen móvil
+make entrenar SNAPSHOT=2017-06-05   # entrena un retador y aplica la regla de reemplazo
+```
+
+El backtest deja en `data/reportes/backtest/snapshot=<fecha>/` las métricas por corte y un resumen;
+`make entrenar` guarda cada versión en `models/` y la decisión en `models/registro.json`. Los
+cuantiles, la ventana y la regla de reemplazo están en `configs/modelo.yaml`; los costos de
+negocio, en `configs/negocio.yaml`. Decisiones y resultados en `DECISIONES.md` (D19 a D24).
+
 Las instrucciones para levantar y ejecutar el producto se agregarán en este archivo.

@@ -243,3 +243,115 @@ Los parámetros están en `configs/preparacion.yaml`.
   pronósticos publicados, en cambio, se calculan siempre con la vista estricta del corte (D13).
 - **Tiendas nuevas:** una tienda sin historia aparece con las variables de historia vacías; el
   modelo y el baseline deben poder pronosticarla con las variables de la tienda y del calendario.
+
+## Modelado
+
+Los modelos están en `src/inventario/modelos/` y se configuran en `configs/modelo.yaml`; los costos
+de negocio, en `configs/negocio.yaml`. `make backtest SNAPSHOT=…` compara los modelos y
+`make entrenar SNAPSHOT=…` entrena un retador y aplica la regla de reemplazo.
+
+### D19. Baseline: ingenuo estacional con cuantiles empíricos
+- **Decisión:** el P50 del baseline es la media (en log) de las ventas del mismo día de la semana en
+  las últimas 4 semanas; si no existe, la media de 28 días; si tampoco, cero. Los demás cuantiles
+  suman al P50, por familia, los cuantiles de los residuos observados en entrenamiento.
+- **Alternativas:** la venta de hace 7 días; la media móvil de 7 días.
+- **Justificación:** la estacionalidad semanal es el patrón más fuerte de estas ventas; promediar
+  cuatro semanas la conserva y suaviza días atípicos. Es simple, se explica en una línea y produce
+  cuantiles, así que se compara con las mismas métricas que el modelo de ML.
+
+### D20. Modelo de ML: gradient boosting con pérdida cuantílica, sin deep learning
+- **Decisión:** un `HistGradientBoostingRegressor` de scikit-learn por cuantil (P10, P25, P50, P75,
+  P90, P95), global para todas las series, entrenado sobre log(1 + ventas) con las features de D16 y
+  las variables de tienda y familia como categóricas. Se entrena con 52 semanas de cortes.
+- **Alternativas:** LightGBM; un modelo por tienda o familia; deep learning (DeepAR, LSTM).
+- **Justificación:** el gradient boosting de scikit-learn maneja nulos y categóricas sin
+  preprocesamiento, ya está en la imagen de Airflow (no agrega dependencias) y entrena un cuantil
+  sobre 1.3 millones de filas en ~10 s. Un modelo global aprovecha patrones compartidos entre
+  series y puede pronosticar tiendas nuevas. Como expm1 es creciente, el cuantil de log(1 + y) se
+  convierte directamente en el cuantil de y. Deep learning no se justifica en costo y beneficio:
+  DeepAR (replicado en Statistical Learning II) requiere GPU o mucho más tiempo de entrenamiento y
+  más infraestructura para servirlo, y con 1,782 series diarias y variables tabulares fuertes
+  (promociones, feriados) los modelos de árboles suelen igualarlo o superarlo; además el enunciado
+  pone la complejidad en la operación, no en el modelo.
+- **Post-proceso común a ambos modelos:** los cuantiles se ordenan por fila (no se cruzan), se
+  recortan en cero, y una serie sin ninguna venta en los últimos 56 días conocidos se pronostica en
+  cero (en Kaggle hay familias que una tienda no vende).
+
+### D21. Métrica de negocio: costo del cuantil crítico diario
+- **Decisión:** `configs/negocio.yaml` define, por unidad, el costo de quedarse sin producto
+  (0.30, margen perdido) y el de que sobre: 0.25 para perecederos (PRODUCE, DAIRY, MEATS, POULTRY,
+  SEAFOOD, BREAD/BAKERY, DELI, EGGS, PREPARED FOODS) por merma, y 0.05 para el resto por
+  almacenamiento. La proporción crítica Cu / (Cu + Co) es 0.55 para perecederos y 0.86 para el
+  resto. La métrica de negocio interpola cada día el pronóstico en esa proporción y suma
+  0.30 × faltante + Co × sobrante contra la venta real.
+- **Alternativas:** evaluar solo con métricas técnicas; un costo único para todas las familias.
+- **Justificación:** es el problema del vendedor de periódicos (newsvendor): con esos costos, la
+  cantidad que minimiza el costo esperado es el cuantil crítico de la demanda. La métrica mide
+  exactamente lo que importa al negocio (quiebres de stock en alta rotación y merma en perecederos,
+  como dice el contexto) y cambia si cambian los costos, sin tocar el código. Los valores son
+  supuestos razonables a falta de costos reales de Favorita; lo importante es su proporción.
+- **Métricas técnicas:** WAPE y sesgo del P50, RMSLE (la métrica de la competencia de Kaggle),
+  pinball promedio de los cuantiles normalizada por las ventas, y cobertura del intervalo P10–P90
+  (debería rondar 80 %).
+
+### D22. Validación temporal de origen móvil, igual para todos los modelos
+- **Decisión:** con los datos conocidos en el snapshot, se toman los últimos 12 cortes con el
+  horizonte completo observado y se dividen en 3 bloques de 4. Para cada bloque, cada modelo se
+  entrena desde cero con las filas cuyo objetivo se conocía al inicio del bloque (52 semanas) y se
+  evalúa en sus cortes. Ambos modelos usan exactamente las mismas filas y cortes.
+- **Alternativas:** una sola partición entrenamiento/prueba; validación cruzada aleatoria.
+- **Justificación:** reproduce cómo opera el producto (entrenar con el pasado, pronosticar las
+  semanas siguientes) y da 12 cortes para comparar, no uno. Una partición aleatoria filtraría
+  información del futuro.
+- **Resultado (snapshot 2017-06-05, cortes del 2017-02-27 al 2017-05-15):**
+
+| Modelo | WAPE | Sesgo | RMSLE | Pinball | Cobertura P10–P90 | Costo de negocio |
+|---|---|---|---|---|---|---|
+| Baseline | 0.165 | −3.4 % | 0.587 | 0.060 | 80.6 % | 4,512,780 |
+| GBM | **0.153** | −3.3 % | **0.497** | 0.064 | 85.2 % | **3,920,847** |
+
+  El GBM reduce el costo de negocio 13.1 % y gana 11 de los 12 cortes. Su pinball en unidades es
+  algo peor: el modelo optimiza la pérdida en logaritmo, que pesa igual a las series chicas y a
+  las grandes, mientras que la pinball en unidades la dominan las series grandes. Su intervalo
+  P10–P90 es un poco más ancho de lo necesario (85 % frente al 80 % nominal), lo que favorece al
+  negocio en los no perecederos, donde conviene cubrir un cuantil alto.
+
+### D23. Regla explícita para reemplazar al modelo vigente
+- **Decisión:** un retador reemplaza al vigente solo si, evaluados ambos en los mismos cortes que
+  ninguno usó para entrenar: (1) su costo de negocio es al menos 2 % menor, (2) tiene menor costo en
+  al menos la mitad de los cortes y (3) su cobertura P10–P90 es de al menos 70 %. Si no, se
+  descarta y queda registrado con el motivo. Si el vigente se entrenó con datos posteriores al
+  inicio de la evaluación, la comparación no es válida y el vigente se mantiene.
+- **Alternativas:** reemplazar siempre por el más reciente; decidir solo por WAPE.
+- **Justificación:** el 2 % evita cambiar de modelo por ruido; exigir ganar en la mitad de los
+  cortes evita que una sola semana buena decida; la cobertura mínima evita promover un modelo que
+  ahorra costo porque sus intervalos dejaron de ser confiables. La decisión se toma con la métrica
+  de negocio porque es la que mide el resultado del producto. La regla es una función pura con
+  pruebas (`modelos/promocion.py`).
+
+### D24. Proceso campeón-retador y registro de modelos *(disponibilidad en el tiempo)*
+- **Decisión:** `make entrenar SNAPSHOT=S` reserva los últimos 4 cortes evaluables de S, entrena el
+  retador (GBM) solo con lo conocido antes de esa reserva y lo compara con el vigente en esos cortes.
+  Si todavía no hay vigente, el baseline entrenado con las mismas filas es el vigente inicial. Cada
+  versión queda en `models/<version>/modelo.joblib` y en `models/registro.json` con su ventana, los
+  cortes de evaluación, el costo, el commit de Git, la decisión y el motivo. El modelo promovido no
+  se vuelve a entrenar con los cortes reservados.
+- **Alternativas:** volver a entrenar el ganador con todos los datos antes de usarlo.
+- **Justificación:** el modelo que se usa es exactamente el que se evaluó, lo que hace la decisión
+  trazable y reproducible. El costo es que el modelo vigente no vio las últimas ~6 semanas (4
+  cortes reservados más su horizonte); con un reentrenamiento periódico ese atraso no crece. Con
+  los datos reales, el primer entrenamiento (S = 2017-06-05) dejó al baseline como vigente inicial
+  y promovió al GBM: 19.0 % menos costo, ganó los 4 cortes, cobertura 86.1 %.
+- **Medición del costo de no reentrenar:** se comparó el mismo GBM entrenado hasta el 2017-04-23
+  (como queda con esta decisión) contra uno reentrenado con todo lo conocido al 2017-06-05, en los
+  9 cortes del 2017-06-05 al 2017-07-31, que ninguno vio:
+
+| Opción | WAPE | RMSLE | Cobertura P10–P90 | Costo de negocio |
+|---|---|---|---|---|
+| Sin reentrenar (esta decisión) | 0.125 | 0.397 | 89.2 % | 2,301,064 |
+| Reentrenado con los cortes reservados | 0.128 | 0.396 | 90.8 % | 2,269,277 |
+| Baseline (referencia) | 0.138 | 0.448 | 84.4 % | 2,706,210 |
+
+  Reentrenar baja el costo solo 1.4 %, gana 5 de 9 cortes y empeora levemente el WAPE: con la regla
+  de D23 (mejora mínima de 2 %) ni siquiera calificaría como mejor. La trazabilidad vale más que
+  esa diferencia. Para que el atraso no crezca, el reentrenamiento se programa cada 4 semanas.

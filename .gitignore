@@ -8,3 +8,5 @@ __pycache__/
 /origen.tmp/
 /data/ingesta/
 /data/procesados/
+/models/
+/data/reportes/

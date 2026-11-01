@@ -1,0 +1,18 @@
+# Costos de negocio por unidad vendida. Cambiarlos cambia el pedido sugerido sin tocar el código.
+# Decisiones en DECISIONES.md (D21).
+#
+# costo_faltante: margen perdido (y cliente insatisfecho) por cada unidad que se pudo vender y no había.
+# costo_sobrante: costo de cada unidad que sobra al final del periodo (merma si es perecedero,
+#                 costo de almacenamiento y capital si no lo es).
+# La proporción crítica costo_faltante / (costo_faltante + costo_sobrante) es el cuantil de la
+# demanda que conviene cubrir.
+
+por_defecto:                 # no perecederos
+  costo_faltante: 0.30
+  costo_sobrante: 0.05       # proporción crítica 0.86
+
+grupos:
+  perecederos:
+    familias: [PRODUCE, DAIRY, MEATS, POULTRY, SEAFOOD, BREAD/BAKERY, DELI, EGGS, PREPARED FOODS]
+    costo_faltante: 0.30
+    costo_sobrante: 0.25     # proporción crítica 0.55: la merma pesa casi tanto como el faltante
