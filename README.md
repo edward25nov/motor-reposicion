@@ -34,6 +34,7 @@ originales de Kaggle:
 | Pedido sugerido (10 semanas) | Costo 802,555 frente a 1,085,265 de la regla "pedir lo vendido la semana anterior": **26 % de ahorro** |
 | Situaciones de la operación | 5 archivos en cuarentena con su reenvío, 10 correcciones incorporadas, días faltantes, atrasos y fin de datos sin fallas |
 | Reproducción con DVC | Cortes 2017-07-03 y 2017-08-14 reproducidos desde un clon limpio: 0 pedidos distintos |
+| Verificación desde un clon limpio | Clonar, copiar los CSV, `make airflow-up` y `make operar`: 181 corridas sin fallas ni reintentos y las mismas cifras; una segunda ejecución no cambia nada ([detalle](docs/evidencias/verificacion_clon_limpio.md)) |
 
 ## Cómo funciona
 
@@ -113,9 +114,39 @@ Docker. No hace falta Python en el equipo ni acceso al remoto de DVC.
 
 5. **Detener:** `make airflow-down` (conserva la base de metadatos de Airflow).
 
+### Entorno probado y notas para Windows (WSL2)
+
+Todo el desarrollo y las corridas de evidencia se hicieron en **macOS 27 sobre Apple Silicon
+(arm64)** con Docker Desktop 29.9 (18 CPU y 16 GB disponibles para Docker). **No se probó en
+Windows.** El producto corre completo dentro de contenedores Linux, así que en Windows debería
+funcionar con Docker Desktop y WSL2 (como en la guía de Docker del curso), cuidando lo siguiente:
+
+- **Trabajar dentro de Ubuntu (WSL), no en `/mnt/c`:** clonar el repositorio en la carpeta
+  personal de Ubuntu (`~`) y ejecutar ahí `git clone`, `make airflow-up` y `make operar`. Desde
+  `/mnt/c`, Docker es mucho más lento y puede haber problemas de permisos al escribir en `data/`.
+- **Copiar los CSV de Kaggle desde Windows:** las descargas de Windows se ven desde Ubuntu en
+  `/mnt/c/Users/<usuario>/Downloads/`. Por ejemplo, si se descomprimió ahí la carpeta de la
+  competencia:
+
+  ```bash
+  cp /mnt/c/Users/<usuario>/Downloads/store-sales-time-series-forecasting/{train,stores,holidays_events,oil,transactions}.csv data/raw/kaggle/
+  ```
+
+- **`make`:** si Ubuntu no lo trae, `sudo apt install make`.
+- **Memoria:** la operación necesita unos 6 GB para Docker. Si WSL tiene menos, subir el límite
+  en `%UserProfile%\.wslconfig` (`[wsl2]` y `memory=8GB`) y reiniciar WSL con `wsl --shutdown`.
+- **Finales de línea:** `.gitattributes` fija LF en todos los archivos de texto, así que el
+  `Makefile` y los YAML funcionan aunque se clonen con Git para Windows. Aun así, se recomienda
+  clonar desde Ubuntu.
+- **Arquitectura:** en un PC con procesador x86 (amd64), Docker usa la variante amd64 de la imagen
+  de Airflow, con las mismas versiones de librerías (`requirements.txt`). El flujo y las
+  decisiones son los mismos, pero las cifras pueden variar en los últimos decimales, como ya ocurre
+  entre la publicación en el contenedor (Linux) y la reproducción en macOS (diferencias del orden
+  de 10⁻¹², D27).
+
 Notas:
 
-- En Linux, `make airflow-up` crea `airflow/.env` con tu usuario (`AIRFLOW_UID`) para que los
+- En Linux y WSL, `make airflow-up` crea `airflow/.env` con tu usuario (`AIRFLOW_UID`) para que los
   contenedores puedan escribir en `data/`.
 - El proyecto Compose (`motor-reposicion`), la imagen, el volumen y el puerto 8081 son propios,
   para no chocar con otros Airflow del equipo (D29).
@@ -167,7 +198,9 @@ Qué pasa en cada situación:
   motivo en `data/procesados/calidad/` y en el seguimiento, y el lunes siguiente se vuelve a
   intentar.
 - **Faltan promociones o transacciones:** se pronostica igual y el reporte de calidad lo advierte;
-  la variable queda vacía para esos días.
+  la variable queda vacía para esos días. Con los datos de Kaggle esto ocurre, de forma esperada, en los cortes
+  2017-08-07 y 2017-08-14: `train.csv` termina el 2017-08-15 y `test.csv`, que trae las promociones
+  posteriores, queda fuera del laboratorio por el enunciado.
 - **Total diario de una tienda muy lejos de lo habitual:** advertencia de atípico (D38).
 - **Fechas posteriores a la última llegada de la bandeja:** las corridas se omiten (D36).
 
@@ -175,17 +208,24 @@ Qué pasa en cada situación:
 
 ### Ejecuciones en Airflow
 
-Corrida completa del 2017-06-01 al 2017-08-22 (capturas en [`docs/evidencias/airflow/`](docs/evidencias/airflow/)):
+Capturas en [`docs/evidencias/airflow/`](docs/evidencias/airflow/). Las 01, 03 y 06 a 08 son de la
+verificación desde un clon limpio (`main` en `88f7fb1`); las 02, 04 y 05, de la corrida de evidencia
+anterior (`085d363`). Ambas corridas terminaron con 181 ejecuciones exitosas y las mismas cifras.
 
 | Captura | Muestra |
 |---|---|
-| [01-dags](docs/evidencias/airflow/01-dags.png) | Los tres DAGs y su programación |
+| [01-dags](docs/evidencias/airflow/01-dags.png) | Los tres DAGs, su programación y sus últimas ejecuciones |
 | [02-ejecuciones-todas](docs/evidencias/airflow/02-ejecuciones-todas.png) | Las 181 ejecuciones, todas exitosas |
-| [03-ejecuciones-pronostico-pedido](docs/evidencias/airflow/03-ejecuciones-pronostico-pedido.png) | Los 11 lunes, más el 2017-08-21 y la corrida programada de 2026, omitidos por falta de datos |
+| [03-ejecuciones-pronostico-pedido](docs/evidencias/airflow/03-ejecuciones-pronostico-pedido.png) | Los 11 lunes, más el 2017-08-21 y la corrida programada de 2026, que terminan en segundos porque se omiten por falta de datos |
 | [04-ejecuciones-ingesta-validacion](docs/evidencias/airflow/04-ejecuciones-ingesta-validacion.png) | Las 84 ingestas diarias |
 | [05-ejecuciones-seguimiento-desempeno](docs/evidencias/airflow/05-ejecuciones-seguimiento-desempeno.png) | Los 84 seguimientos diarios |
+| [06-graph-pronostico-pedido](docs/evidencias/airflow/06-graph-pronostico-pedido.png) | Las tareas del DAG semanal: `en_operacion → ingestar → datos_suficientes → entrenar_si_corresponde → preparar → publicar → versionar`, sin tareas ni ejecuciones fallidas |
+| [07-graph-ingesta-validacion](docs/evidencias/airflow/07-graph-ingesta-validacion.png) | Las tareas del DAG diario de ingesta |
+| [08-graph-seguimiento-desempeno](docs/evidencias/airflow/08-graph-seguimiento-desempeno.png) | Las tareas del DAG diario de seguimiento |
 
 ![DAGs en Airflow](docs/evidencias/airflow/01-dags.png)
+
+![Tareas de pronostico_pedido](docs/evidencias/airflow/06-graph-pronostico-pedido.png)
 
 ### Cómo reaccionó el flujo a las situaciones de la operación
 
@@ -334,9 +374,24 @@ reportes se versionan con DVC. El remoto `origin` está en DagsHub:
 de cada corte y `dvc push` si hay credenciales (D33).
 
 **Para evaluar el producto no hace falta acceso al remoto:** todo se reconstruye desde los CSV de
-Kaggle. Si los CSV son los originales, su hash coincide con el registrado en
-`data/raw/kaggle.dvc` (`dvc status data/raw/kaggle.dvc`). DagsHub exige iniciar sesión incluso en
-repositorios públicos, así que `dvc pull` requiere una cuenta con acceso al repositorio:
+Kaggle. Para comprobar que los CSV colocados son los originales, sin acceso al remoto:
+
+```bash
+dvc add data/raw/kaggle && git diff --exit-code data/raw/kaggle.dvc
+```
+
+Si no muestra diferencias, su hash coincide con la versión registrada. (`dvc status` no sirve para
+esto en un clon nuevo: sin caché local responde "not in cache" tanto con los archivos originales
+como con otros; se comprobó.) Sin DVC instalado en el equipo, la misma comprobación se hace dentro
+del contenedor (con Airflow levantado):
+
+```bash
+docker compose -f airflow/docker-compose.yaml exec airflow-scheduler bash -c "cd /opt/motor && dvc add data/raw/kaggle" \
+  && git diff --exit-code data/raw/kaggle.dvc
+```
+
+DagsHub exige iniciar sesión incluso en repositorios públicos, así que `dvc pull` requiere una
+cuenta con acceso al repositorio:
 
 ```bash
 dvc remote modify origin --local auth basic

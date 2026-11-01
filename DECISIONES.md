@@ -73,7 +73,10 @@ están marcadas con su tema.
   está versionado con DVC (`data/raw/kaggle.dvc`).
 - **Alternativas:** una ruta fuera del repositorio configurada por variable de entorno.
 - **Justificación:** es como evalúa el docente. Usar el mismo directorio que versiona DVC permite
-  comprobar con `dvc status data/raw/kaggle.dvc` que los archivos colocados son los originales.
+  comprobar que los archivos colocados son los originales: `dvc add data/raw/kaggle` recalcula el
+  hash y `git diff --exit-code data/raw/kaggle.dvc` no muestra cambios si coinciden. `dvc status`
+  no sirve para esto en un clon nuevo: sin caché local responde "not in cache" tanto con los
+  archivos originales como con uno alterado (se comprobó durante la verificación final).
 
 ### D3. Sin MLflow en este laboratorio
 - **Decisión:** la comparación de modelos y la regla de reemplazo se registran en archivos de métricas
@@ -657,8 +660,9 @@ fecha lógica.
   11 cortes. La frescura de las demás fuentes hace visible una degradación que antes era
   silenciosa: si las promociones dejan de llegar, el modelo recibe la variable vacía, un caso que
   no vio al entrenar. Con la bandeja simulada ocurre al final del periodo: en los cortes
-  2017-08-07 y 2017-08-14 solo el 57 % y el 7 % del horizonte tiene promociones, porque Kaggle
-  termina el 2017-08-15.
+  2017-08-07 y 2017-08-14 solo el 57 % y el 7 % del horizonte tiene promociones. Es esperado y
+  no es una falla: `train.csv` termina el 2017-08-15 y `test.csv`, que trae las promociones de las
+  fechas siguientes, queda fuera del laboratorio por el enunciado.
 
 ### D39. Lo que queda como trabajo futuro
 - **Evaluar los modelos con el costo del pedido semanal.** La regla de reemplazo (D23) compara el

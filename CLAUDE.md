@@ -61,6 +61,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - Un corte T usa el modelo vigente as-of (`registro.vigente_al(T)`), nunca uno con snapshot posterior.
 - El compose fija `OMP_NUM_THREADS=4` y un heartbeat de 1200 s: sin eso el entrenamiento deja sin CPU a Airflow (D37).
 - Los modelos se guardan con `registro.guardar_modelo` (pickle en C + gzip), nunca con joblib: Airflow importa `dill` y contamina el pickler de joblib.
+- Entorno probado: macOS arm64 con Docker Desktop. No probado en Windows; las notas para WSL2 están en el README. `.gitattributes` fija LF: no quitarlo.
 - Las versiones de `requirements.txt` están fijadas a las restricciones de Airflow 3.3.2: no cambiarlas sin cambiar la imagen.
 - Las tareas son idempotentes: cada fecha escribe en su propia carpeta y reemplaza su resultado (borrar e insertar en una transacción).
 - XCom solo lleva valores pequeños (rutas, conteos); los datos van a disco.
