@@ -355,3 +355,68 @@ de negocio, en `configs/negocio.yaml`. `make backtest SNAPSHOT=…` compara los 
   Reentrenar baja el costo solo 1.4 %, gana 5 de 9 cortes y empeora levemente el WAPE: con la regla
   de D23 (mejora mínima de 2 %) ni siquiera calificaría como mejor. La trazabilidad vale más que
   esa diferencia. Para que el atraso no crezca, el reentrenamiento se programa cada 4 semanas.
+
+## Pedido sugerido y publicación
+
+`make publicar CORTE=…` aplica el modelo vigente a las features del corte y publica en
+`data/publicado/corte=<fecha>/` el pronóstico, el pedido y un manifest. Los parámetros del pedido
+están en `configs/negocio.yaml` (sección `pedido`).
+
+### D25. El pedido es la suma de los cuantiles críticos diarios del periodo de cobertura
+- **Decisión:** para cada tienda y familia, se interpola cada día del periodo de cobertura el
+  pronóstico en la proporción crítica de la familia (D21) y se suman esos valores; se resta el
+  inventario disponible y se redondea hacia arriba.
+- **Alternativas:** el cuantil crítico de la demanda semanal suponiendo días independientes
+  (aproximación normal); escalar el margen sobre el P50 con un factor calibrado.
+- **Justificación:** sumar cuantiles es exacto si los errores de los días están perfectamente
+  correlacionados y conservador si no; suponer independencia subestima el riesgo, porque cuando
+  una serie se desvía suele hacerlo varios días seguidos. Se midió el nivel de servicio semanal
+  real (proporción de semanas en que la venta no supera el pedido) y el costo con un factor
+  k ∈ [0.5, 1] sobre el margen (pedido = P50 + k · (crítico − P50)), con un GBM entrenado hasta el
+  2017-02-26 en los 12 cortes de febrero a mayo de 2017, antes de operar:
+
+| k | Servicio no perecederos (objetivo 85.7 %) | Servicio perecederos (objetivo 54.5 %) | Costo semanal |
+|---|---|---|---|
+| **1.0 (esta decisión)** | 92.3 % | 54.8 % | **1,116,546** |
+| 0.8 | 88.4 % | 53.2 % | 1,135,508 |
+| 0.7 | 85.3 % | 52.3 % | 1,155,796 |
+| 0.5 | 76.8 % | 50.7 % | 1,229,178 |
+
+  k = 1 es el de menor costo aunque el servicio de los no perecederos quede por encima del
+  objetivo: el margen extra compensa el sesgo a la baja del P50 (−3 %, D22). En junio y julio un
+  factor de 0.7 habría costado 3.6 % menos, pero calibrarlo con el periodo que se evalúa sería
+  usar información del futuro; no se agrega el factor.
+
+### D26. Entrega a dos días y cobertura de una semana; sin inventario informado
+- **Decisión:** el pedido del lunes T llega el miércoles (T+2) y cubre siete días, de T+2 a T+8,
+  hasta que llega el pedido siguiente. Como las tiendas no informan inventario, se pide la
+  cantidad completa (`inventario_disponible: 0`).
+- **Alternativas:** cubrir desde T+1; estimar el inventario con pedidos y ventas anteriores.
+- **Justificación:** el periodo de cobertura debe empezar cuando la mercadería está disponible y
+  durar hasta la siguiente entrega; con 14 días de horizonte caben holgadamente. Estimar el
+  inventario sin datos de recepción ni merma real sería inventar un dato; el parámetro permite
+  conectar el inventario real cuando exista.
+
+### D27. Publicación inmutable con manifest, y reproducción *(manejo de correcciones)*
+- **Decisión:** cada corte se publica una sola vez en `data/publicado/corte=<fecha>/`:
+  `pronostico.parquet`, `pedido.csv` y `manifest.json`. El manifest registra el commit de Git, la
+  versión y el MD5 del modelo, el MD5 de las features y de cada archivo de configuración, y la
+  huella de los datos: el hash de la lista exacta de archivos (fuente, clave, llegada, hash) que
+  estaban vigentes al corte. Si el corte ya está publicado, publicar no hace nada.
+  `make reproducir CORTE=…` vuelve a calcular el pronóstico con los datos as-of y el modelo del
+  manifest y lo compara con lo publicado.
+- **Alternativas:** volver a publicar cuando llega una corrección.
+- **Justificación:** un pedido ya se envió al centro de distribución: reescribirlo con datos que
+  llegaron después borraría lo que realmente se recomendó y haría imposible evaluar la decisión.
+  Las correcciones se reflejan en el seguimiento y en los pronósticos siguientes, no en los
+  publicados. Gracias a la lectura as-of, la huella de datos de un corte no cambia aunque lleguen
+  correcciones, y la reproducción da exactamente el mismo resultado: con los datos reales, el
+  corte 2017-07-03 se reproduce con diferencia 0 aunque el reenvío de las ventas del 1 de julio
+  llegó el 4.
+
+### D28. Tiendas o categorías que el modelo no vio al entrenar
+- **Decisión:** una categoría desconocida (por ejemplo, una tienda nueva) entra al GBM como valor
+  faltante; el pronóstico usa el resto de las variables (familia, ciudad, tipo, calendario).
+- **Justificación:** el gradient boosting ya aprende qué hacer con faltantes, así que la tienda
+  nueva recibe un pronóstico razonable en lugar de un error. Hay una prueba que entrena sin una
+  tienda y exige pronóstico completo para ella.
