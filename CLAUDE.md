@@ -9,6 +9,8 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `make preparar CORTE=AAAA-MM-DD`: features del corte en `data/procesados/` (lectura as-of).
 - `make backtest SNAPSHOT=AAAA-MM-DD` y `make entrenar SNAPSHOT=AAAA-MM-DD`: comparación de modelos y campeón-retador.
 - `make publicar CORTE=AAAA-MM-DD` y `make reproducir CORTE=AAAA-MM-DD`: publicación inmutable del pronóstico y pedido, y su reproducción.
+- `make airflow-up` / `make airflow-down`: Airflow 3.3.2 en Docker (http://localhost:8081, airflow/airflow).
+- `make operar DESDE=AAAA-MM-DD HASTA=AAAA-MM-DD`: backfill de los dos DAGs (primero crea las corridas, luego activa los DAGs).
 - `make origen`: construye la carga histórica y la bandeja en `origen/` a partir de `data/raw/kaggle/`.
 - Sin make: `PYTHONPATH=src python -m pytest -q` y `PYTHONPATH=src python -m inventario.origen.generar`.
 
@@ -26,7 +28,8 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `origen/`: generado por `make origen`, no se versiona en Git. `bandeja/llegada=<AAAA-MM-DD>/<fuente>_<clave>.csv`: la carpeta es el día en que el archivo está disponible.
 - `dags/`: DAGs de Airflow 3. Solo orquestan: llaman funciones de `src/inventario/`.
 - `configs/`: configuración versionada (siempre se lee del repositorio, aunque cambie `MOTOR_RAIZ`) (costos de negocio, modelo, fuentes).
-- `docker/`: Airflow 3 con Docker Compose.
+- `airflow/`: `docker-compose.yaml` (proyecto `motor-reposicion`, puerto 8081, repo en `/opt/motor`, origen en `/opt/origen:ro`), `Dockerfile`, `.env.example`.
+- `src/inventario/operacion.py` (cuándo reentrenar) y `src/inventario/versionado.py` (dvc add/push del flujo).
 - `tests/`: pruebas con pytest; corren en cada Pull Request (GitHub Actions).
 - `DECISIONES.md`: decisiones técnicas y de producto, con alternativas y justificación. **Toda decisión nueva se agrega ahí** (numerada D1, D2, ...) en el mismo Pull Request que la implementa.
 
@@ -47,7 +50,11 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - La variable objetivo es log(1 + ventas); las predicciones se devuelven en unidades, ordenadas y no negativas.
 
 ## Reglas de Airflow
-- Cada tarea usa `logical_date`, nunca la fecha de hoy.
+- Cada tarea usa `logical_date` (`{{ ds }}`), nunca la fecha de hoy.
+- Todas las tareas usan el pool `motor` (1 cupo) y `depends_on_past=True`; el backfill necesita `--reprocess-behavior failed`.
+- Un corte T usa el modelo vigente as-of (`registro.vigente_al(T)`), nunca uno con snapshot posterior.
+- Los modelos se guardan con `registro.guardar_modelo` (pickle en C + gzip), nunca con joblib: Airflow importa `dill` y contamina el pickler de joblib.
+- Las versiones de `requirements.txt` están fijadas a las restricciones de Airflow 3.3.2: no cambiarlas sin cambiar la imagen.
 - Las tareas son idempotentes: cada fecha escribe en su propia carpeta y reemplaza su resultado (borrar e insertar en una transacción).
 - XCom solo lleva valores pequeños (rutas, conteos); los datos van a disco.
 - Los datos inválidos detienen el flujo antes de contaminar el resultado; las situaciones esperadas del negocio (feriados, tiendas cerradas, archivos atrasados) no provocan fallas.

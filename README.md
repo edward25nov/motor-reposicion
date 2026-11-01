@@ -4,6 +4,41 @@ Producto de ML que cada semana transforma las ventas que llegan a diario en un p
 
 Datos: Corporación Favorita (Kaggle *Store Sales – Time Series Forecasting*). Laboratorio 1 del curso Product Development.
 
+## Levantar y ejecutar el producto desde cero
+
+Requisitos: Docker Desktop (o Docker Engine con Compose v2), `make` y unos 6 GB de memoria para
+Docker.
+
+1. Clonar el repositorio y colocar los CSV de Kaggle en `data/raw/kaggle/` (ver *Datos de entrada*).
+2. Levantar Airflow. Construye la imagen, genera el sistema de origen (carga histórica y bandeja)
+   a partir de los CSV y deja la interfaz en <http://localhost:8081> (usuario `airflow`, clave
+   `airflow`):
+
+   ```bash
+   make airflow-up
+   ```
+
+3. Ejecutar la operación sobre un periodo con backfill (por defecto, del 2017-06-01 al
+   2017-08-14):
+
+   ```bash
+   make operar DESDE=2017-06-01 HASTA=2017-08-14
+   ```
+
+   Corre el DAG diario `ingesta_validacion` y el semanal `pronostico_pedido` (cada lunes: pone al
+   día la ingesta, entrena un retador cada 4 semanas, prepara los datos, publica el pronóstico y el
+   pedido y los versiona con DVC). Cada corte espera al anterior. El avance se ve en la vista
+   *Grid* de cada DAG.
+
+4. Detener: `make airflow-down` (conserva la base de metadatos de Airflow).
+
+Los resultados quedan en el repositorio: `data/ingesta/` (registro y cuarentena),
+`data/procesados/`, `models/` y `data/publicado/corte=<fecha>/`.
+
+En Linux, `make airflow-up` crea `airflow/.env` con tu usuario (`AIRFLOW_UID`) para que los
+contenedores puedan escribir en `data/`. Los nombres del proyecto Compose (`motor-reposicion`), la
+imagen, el volumen y el puerto 8081 son propios, para no chocar con otros Airflow del equipo.
+
 ## Datos de entrada
 
 El producto se reconstruye desde los archivos originales de Kaggle. Descárgalos de
@@ -103,4 +138,16 @@ Cada corte se publica una sola vez en `data/publicado/corte=<fecha>/`: `pronosti
 familia para la semana de miércoles a martes) y `manifest.json` (commit, modelo, configuración y
 huella de los datos usados). Decisiones en `DECISIONES.md` (D25 a D28).
 
-Las instrucciones para levantar y ejecutar el producto se agregarán en este archivo.
+## Comandos sin Docker
+
+Cada paso también se puede ejecutar fuera de Airflow con Python 3.12 o superior:
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+make test PYTHON=.venv/bin/python
+make origen PYTHON=.venv/bin/python
+make ingesta CORTE=2017-07-17 PYTHON=.venv/bin/python
+make entrenar SNAPSHOT=2017-06-05 PYTHON=.venv/bin/python
+make preparar CORTE=2017-07-17 PYTHON=.venv/bin/python
+make publicar CORTE=2017-07-17 PYTHON=.venv/bin/python
+```
