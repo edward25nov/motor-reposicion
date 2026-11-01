@@ -1,0 +1,154 @@
+# Airflow 3.3.2 con LocalExecutor y PostgreSQL, adaptado del docker-compose oficial para el motor de
+# reposición. Solo para desarrollo y evaluación local.
+#
+# Nombres propios (proyecto, imagen, volumen y puerto) para no chocar con otros proyectos de Airflow
+# en el mismo equipo. Decisiones en DECISIONES.md (D29 a D32).
+#
+#   make airflow-up     construye y levanta todo (http://localhost:8081, usuario y clave: airflow)
+#   make airflow-down   detiene los contenedores (conserva la base de metadatos)
+
+name: motor-reposicion
+
+x-airflow-common:
+  &airflow-common
+  image: motor-reposicion-airflow:3.3.2
+  build:
+    context: ..
+    dockerfile: airflow/Dockerfile
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__PARALLELISM: 4
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/motor/dags
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: 30
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
+    AIRFLOW__API_AUTH__JWT_SECRET: motor-reposicion-jwt
+    AIRFLOW__API_AUTH__JWT_ISSUER: motor-reposicion
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # El código y los datos del producto: el repositorio completo, fuera de /opt/airflow
+    # (airflow-init cambia el dueño de lo que está ahí).
+    MOTOR_RAIZ: /opt/motor
+    # El sistema de origen simulado, en solo lectura: el flujo lee la bandeja, nunca la modifica.
+    MOTOR_ORIGEN: /opt/origen
+    PYTHONPATH: /opt/motor/src
+    # Última fecha con datos en Kaggle: los DAGs no programan corridas posteriores.
+    MOTOR_FIN_OPERACION: "2017-08-15"
+  volumes:
+    - ..:/opt/motor
+    - ../origen:/opt/origen:ro
+    - ./logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Sistema de origen simulado: genera la carga histórica y la bandeja a partir de los CSV de
+  # Kaggle en data/raw/kaggle/. Corre una vez antes de Airflow; si ya se generó con los mismos
+  # CSV y configuración, no hace nada.
+  origen:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command: ["-c", "cd /opt/motor && python -m inventario.origen.generar"]
+    environment:
+      <<: *airflow-common-env
+      MOTOR_ORIGEN: /opt/motor/origen
+    volumes:
+      - ..:/opt/motor
+    depends_on: {}
+    restart: "no"
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/logs
+        /entrypoint airflow version
+        /entrypoint airflow pools set motor 1 "Tareas que escriben el estado compartido (registro, modelos, DVC)"
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: airflow
+      _AIRFLOW_WWW_USER_PASSWORD: airflow
+    user: "0:0"
+    depends_on:
+      <<: *airflow-common-depends-on
+      origen:
+        condition: service_completed_successfully
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-db:
