@@ -32,6 +32,12 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: motor-reposicion-jwt
     AIRFLOW__API_AUTH__JWT_ISSUER: motor-reposicion
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # El entrenamiento usa toda la CPU por minutos; con el límite de 300 s una tarea sana se dio
+    # por muerta (sin heartbeat) y se reintentó. Ver D37.
+    AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: 1200
+    # scikit-learn usa por defecto todos los núcleos y deja sin CPU al resto de Airflow; con 4
+    # hilos el entrenamiento es igual de rápido (medido: 7.9 s por cuantil contra 9 s sin límite).
+    OMP_NUM_THREADS: 4
     # El código y los datos del producto: el repositorio completo, fuera de /opt/airflow
     # (airflow-init cambia el dueño de lo que está ahí).
     MOTOR_RAIZ: /opt/motor

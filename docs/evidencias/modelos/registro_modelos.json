@@ -1,0 +1,72 @@
+{
+  "vigente": "gbm-2017-07-03",
+  "versiones": {
+    "baseline-2017-06-05": {
+      "tipo": "baseline",
+      "snapshot": "2017-06-05",
+      "entrenado_hasta": "2017-04-23",
+      "cortes_evaluacion": [
+        "2017-04-24",
+        "2017-05-01",
+        "2017-05-08",
+        "2017-05-15"
+      ],
+      "costo_evaluacion": 1634254.05,
+      "wape_evaluacion": 0.1705,
+      "git_commit": "085d363fb973c238ace04523e694a12206f113c0",
+      "decision": "vigente inicial",
+      "motivo": "no había modelo vigente: el baseline es el piso"
+    },
+    "gbm-2017-06-05": {
+      "tipo": "gbm",
+      "snapshot": "2017-06-05",
+      "entrenado_hasta": "2017-04-23",
+      "cortes_evaluacion": [
+        "2017-04-24",
+        "2017-05-01",
+        "2017-05-08",
+        "2017-05-15"
+      ],
+      "costo_evaluacion": 1315826.27,
+      "wape_evaluacion": 0.1532,
+      "git_commit": "085d363fb973c238ace04523e694a12206f113c0",
+      "comparado_con": "baseline-2017-06-05",
+      "decision": "promovido",
+      "motivo": "se promueve: mejora de costo 19.5%, gana 100% de los cortes, cobertura 87.0%"
+    },
+    "gbm-2017-07-03": {
+      "tipo": "gbm",
+      "snapshot": "2017-07-03",
+      "entrenado_hasta": "2017-05-21",
+      "cortes_evaluacion": [
+        "2017-05-22",
+        "2017-05-29",
+        "2017-06-05",
+        "2017-06-12"
+      ],
+      "costo_evaluacion": 1110402.95,
+      "wape_evaluacion": 0.1366,
+      "git_commit": "085d363fb973c238ace04523e694a12206f113c0",
+      "comparado_con": "gbm-2017-06-05",
+      "decision": "promovido",
+      "motivo": "se promueve: mejora de costo 8.4%, gana 100% de los cortes, cobertura 88.8%"
+    },
+    "gbm-2017-07-31": {
+      "tipo": "gbm",
+      "snapshot": "2017-07-31",
+      "entrenado_hasta": "2017-06-18",
+      "cortes_evaluacion": [
+        "2017-06-19",
+        "2017-06-26",
+        "2017-07-03",
+        "2017-07-10"
+      ],
+      "costo_evaluacion": 937751.94,
+      "wape_evaluacion": 0.117,
+      "git_commit": "085d363fb973c238ace04523e694a12206f113c0",
+      "comparado_con": "gbm-2017-07-03",
+      "decision": "descartado",
+      "motivo": "se descarta: mejora de costo 0.5% < 2%"
+    }
+  }
+}

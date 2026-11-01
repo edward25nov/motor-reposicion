@@ -33,6 +33,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `src/inventario/seguimiento/`: `seguimiento.py` (métricas de lo publicado) y `reporte.py` (HTML).
 - `src/inventario/operacion.py` (cuándo reentrenar y guardas de fin de operación) y `src/inventario/versionado.py` (dvc add/push del flujo).
 - `tests/`: pruebas con pytest; corren en cada Pull Request (GitHub Actions).
+- `docs/evidencias/`: capturas de Airflow, comparación de modelos, seguimiento y reproducción con DVC (copias pequeñas de reportes; la fuente es DVC).
 - `DECISIONES.md`: decisiones técnicas y de producto, con alternativas y justificación. **Toda decisión nueva se agrega ahí** (numerada D1, D2, ...) en el mismo Pull Request que la implementa.
 
 ## Reglas de disponibilidad de la información
@@ -56,6 +57,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - Todas las tareas usan el pool `motor` (1 cupo) y `depends_on_past=True`; el backfill necesita `--reprocess-behavior failed`.
 - Cada DAG empieza con `en_operacion` (`@task.short_circuit`): fuera de los datos del origen se omite. No usar `end_date` (el backfill lo ignora).
 - Un corte T usa el modelo vigente as-of (`registro.vigente_al(T)`), nunca uno con snapshot posterior.
+- El compose fija `OMP_NUM_THREADS=4` y un heartbeat de 1200 s: sin eso el entrenamiento deja sin CPU a Airflow (D37).
 - Los modelos se guardan con `registro.guardar_modelo` (pickle en C + gzip), nunca con joblib: Airflow importa `dill` y contamina el pickler de joblib.
 - Las versiones de `requirements.txt` están fijadas a las restricciones de Airflow 3.3.2: no cambiarlas sin cambiar la imagen.
 - Las tareas son idempotentes: cada fecha escribe en su propia carpeta y reemplaza su resultado (borrar e insertar en una transacción).
