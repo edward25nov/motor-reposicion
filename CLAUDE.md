@@ -8,6 +8,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `make ingesta CORTE=AAAA-MM-DD`: procesa la bandeja hasta el corte (valida, cuarentena, registro).
 - `make preparar CORTE=AAAA-MM-DD`: features del corte en `data/procesados/` (lectura as-of).
 - `make backtest SNAPSHOT=AAAA-MM-DD` y `make entrenar SNAPSHOT=AAAA-MM-DD`: comparación de modelos y campeón-retador.
+- `make publicar CORTE=AAAA-MM-DD` y `make reproducir CORTE=AAAA-MM-DD`: publicación inmutable del pronóstico y pedido, y su reproducción.
 - `make origen`: construye la carga histórica y la bandeja en `origen/` a partir de `data/raw/kaggle/`.
 - Sin make: `PYTHONPATH=src python -m pytest -q` y `PYTHONPATH=src python -m inventario.origen.generar`.
 
@@ -17,6 +18,8 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - `src/inventario/ingesta/`: `validacion.py` (reglas puras), `registro.py` (SQLite), `ingestar.py` (proceso por corte), `vigente.py` (lectura as-of).
 - `src/inventario/preparacion/`: `calendario.py` (feriados), `features.py` (features por corte, función pura), `preparar.py` (corte en operación y conjunto de entrenamiento).
 - `src/inventario/modelos/`: `baseline.py`, `gbm.py` (misma interfaz `ajustar`/`predecir` con columnas p10…p95), `metricas.py`, `promocion.py` (regla pura), `evaluacion.py` (esquema temporal común), `backtest.py`, `entrenar.py`, `registro.py`.
+- `src/inventario/publicacion/`: `pedido.py` (pronóstico y pedido, funciones puras), `publicar.py` (publicación con manifest), `reproducir.py`.
+- `data/publicado/`: publicaciones por corte; no va a Git.
 - `models/`: versiones entrenadas y `registro.json` (vigente, anterior, decisiones); no va a Git.
 - `data/procesados/`: features y reportes de calidad por corte, no va a Git.
 - `data/ingesta/`: generado por la ingesta (recibidos, validos, registro.db, reportes), no va a Git.
@@ -33,7 +36,7 @@ Datos: Corporación Favorita (Kaggle *Store Sales*): train, stores, holidays_eve
 - La bandeja es un sistema externo: se lee, nunca se modifica (se monta en solo lectura).
 - Todo dato que alimente un pronóstico con corte T se lee con `vigente.leer(fuente, T)`: nunca directo de la bandeja ni de `validos/`.
 - `origen/incidentes_simulados.csv` es la hoja de respuestas de la simulación: el flujo nunca la lee; solo la usan las pruebas y la evidencia.
-- Los pronósticos publicados son inmutables; una corrección de datos reprocesa la preparación y el seguimiento, no la publicación.
+- Los pronósticos publicados son inmutables (`publicar` no reescribe un corte ya publicado); una corrección de datos reprocesa la preparación y el seguimiento, no la publicación.
 - Las features de un corte T solo usan cada fuente hasta T − atraso (`configs/preparacion.yaml`); hay una prueba que altera las ventas posteriores al corte y exige features idénticas.
 - La validación temporal usa los mismos cortes para todos los modelos comparados; nunca split aleatorio.
 
