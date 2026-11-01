@@ -133,7 +133,7 @@ def test_entrenar_registra_vigente_inicial_y_decision(proyecto):
     gbm = reg["versiones"]["gbm-2017-07-31"]
     assert gbm["decision"] in {"promovido", "descartado"} and gbm["comparado_con"] == "baseline-2017-07-31"
     assert reg["vigente"] == ("gbm-2017-07-31" if gbm["decision"] == "promovido" else "baseline-2017-07-31")
-    assert registro.vigente()[0] == reg["vigente"]
+    assert registro.vigente("2017-07-31")[0] == reg["vigente"]
 
     antes = (proyecto / "models" / "registro.json").read_text()
     entrenar.ejecutar("2017-07-31", cfg_rapido())                  # idempotente
@@ -156,3 +156,15 @@ def test_gbm_pronostica_una_tienda_que_no_vio_al_entrenar(tabla):
     prueba = tabla[tabla["corte"] >= "2017-06-26"]
     pred = GBMCuantiles(Q, cfg_rapido()["gbm"]).ajustar(entreno).predecir(prueba)
     assert pred.loc[prueba["store_nbr"] == 3].notna().all().all()
+
+
+def test_el_modelo_guardado_no_depende_de_dill(proyecto, tabla):
+    """Airflow importa dill, que modifica el pickler de Python puro; el modelo no debe depender de él."""
+    import gzip
+
+    dill = pytest.importorskip("dill")  # noqa: F841  (importarlo activa el cambio global)
+    modelo = GBMCuantiles(Q, cfg_rapido()["gbm"]).ajustar(tabla)
+    registro.guardar_modelo("prueba", modelo)
+    contenido = gzip.decompress(registro.ruta_modelo("prueba").read_bytes())
+    assert b"dill" not in contenido
+    pd.testing.assert_frame_equal(registro.cargar_modelo("prueba").predecir(tabla), modelo.predecir(tabla))
