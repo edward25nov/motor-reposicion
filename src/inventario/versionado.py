@@ -1,4 +1,4 @@
-"""Versiona con DVC lo que produce el flujo: datos de ingesta, procesados, modelos y publicaciones.
+"""Versiona con DVC lo que produce el flujo: ingesta, procesados, modelos, publicaciones y reportes.
 
 `dvc add` registra el contenido actual en el caché de DVC y actualiza el puntero .dvc de cada
 directorio. Si el remoto tiene credenciales configuradas (.dvc/config.local), además hace
@@ -11,7 +11,7 @@ import subprocess
 
 from inventario import rutas
 
-DIRECTORIOS = ("data/ingesta", "data/procesados", "models", "data/publicado")
+DIRECTORIOS = ("data/ingesta", "data/procesados", "models", "data/publicado", "data/reportes")
 
 
 def _dvc(*args: str, timeout: int = 600) -> subprocess.CompletedProcess:
