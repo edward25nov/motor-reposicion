@@ -124,6 +124,14 @@ funcionar con Docker Desktop y WSL2 (como en la guía de Docker del curso), cuid
 - **Trabajar dentro de Ubuntu (WSL), no en `/mnt/c`:** clonar el repositorio en la carpeta
   personal de Ubuntu (`~`) y ejecutar ahí `git clone`, `make airflow-up` y `make operar`. Desde
   `/mnt/c`, Docker es mucho más lento y puede haber problemas de permisos al escribir en `data/`.
+- **Copiar los CSV de Kaggle desde Windows:** las descargas de Windows se ven desde Ubuntu en
+  `/mnt/c/Users/<usuario>/Downloads/`. Por ejemplo, si se descomprimió ahí la carpeta de la
+  competencia:
+
+  ```bash
+  cp /mnt/c/Users/<usuario>/Downloads/store-sales-time-series-forecasting/{train,stores,holidays_events,oil,transactions}.csv data/raw/kaggle/
+  ```
+
 - **`make`:** si Ubuntu no lo trae, `sudo apt install make`.
 - **Memoria:** la operación necesita unos 6 GB para Docker. Si WSL tiene menos, subir el límite
   en `%UserProfile%\.wslconfig` (`[wsl2]` y `memory=8GB`) y reiniciar WSL con `wsl --shutdown`.
@@ -372,15 +380,15 @@ Kaggle. Para comprobar que los CSV colocados son los originales, sin acceso al r
 dvc add data/raw/kaggle && git diff --exit-code data/raw/kaggle.dvc
 ```
 
-Si no muestra diferencias, su hash coincide con la versión registrada. Sin DVC instalado en el
-equipo, la misma comprobación se hace dentro del contenedor (con Airflow levantado):
+Si no muestra diferencias, su hash coincide con la versión registrada. (`dvc status` no sirve para
+esto en un clon nuevo: sin caché local responde "not in cache" tanto con los archivos originales
+como con otros; se comprobó.) Sin DVC instalado en el equipo, la misma comprobación se hace dentro
+del contenedor (con Airflow levantado):
 
 ```bash
 docker compose -f airflow/docker-compose.yaml exec airflow-scheduler bash -c "cd /opt/motor && dvc add data/raw/kaggle" \
   && git diff --exit-code data/raw/kaggle.dvc
-``` (`dvc status` no sirve en un
-clon nuevo: sin caché local responde "not in cache" tanto con los archivos originales como con
-otros; se comprobó.)
+```
 
 DagsHub exige iniciar sesión incluso en repositorios públicos, así que `dvc pull` requiere una
 cuenta con acceso al repositorio:
