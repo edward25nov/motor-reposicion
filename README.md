@@ -34,6 +34,7 @@ originales de Kaggle:
 | Pedido sugerido (10 semanas) | Costo 802,555 frente a 1,085,265 de la regla "pedir lo vendido la semana anterior": **26 % de ahorro** |
 | Situaciones de la operación | 5 archivos en cuarentena con su reenvío, 10 correcciones incorporadas, días faltantes, atrasos y fin de datos sin fallas |
 | Reproducción con DVC | Cortes 2017-07-03 y 2017-08-14 reproducidos desde un clon limpio: 0 pedidos distintos |
+| Verificación desde un clon limpio | Clonar, copiar los CSV, `make airflow-up` y `make operar`: 181 corridas sin fallas ni reintentos y las mismas cifras; una segunda ejecución no cambia nada ([detalle](docs/evidencias/verificacion_clon_limpio.md)) |
 
 ## Cómo funciona
 
@@ -334,9 +335,18 @@ reportes se versionan con DVC. El remoto `origin` está en DagsHub:
 de cada corte y `dvc push` si hay credenciales (D33).
 
 **Para evaluar el producto no hace falta acceso al remoto:** todo se reconstruye desde los CSV de
-Kaggle. Si los CSV son los originales, su hash coincide con el registrado en
-`data/raw/kaggle.dvc` (`dvc status data/raw/kaggle.dvc`). DagsHub exige iniciar sesión incluso en
-repositorios públicos, así que `dvc pull` requiere una cuenta con acceso al repositorio:
+Kaggle. Para comprobar que los CSV colocados son los originales, sin acceso al remoto:
+
+```bash
+dvc add data/raw/kaggle && git diff --exit-code data/raw/kaggle.dvc
+```
+
+Si no muestra diferencias, su hash coincide con la versión registrada. (`dvc status` no sirve en un
+clon nuevo: sin caché local responde "not in cache" tanto con los archivos originales como con
+otros; se comprobó.)
+
+DagsHub exige iniciar sesión incluso en repositorios públicos, así que `dvc pull` requiere una
+cuenta con acceso al repositorio:
 
 ```bash
 dvc remote modify origin --local auth basic

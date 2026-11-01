@@ -73,7 +73,10 @@ están marcadas con su tema.
   está versionado con DVC (`data/raw/kaggle.dvc`).
 - **Alternativas:** una ruta fuera del repositorio configurada por variable de entorno.
 - **Justificación:** es como evalúa el docente. Usar el mismo directorio que versiona DVC permite
-  comprobar con `dvc status data/raw/kaggle.dvc` que los archivos colocados son los originales.
+  comprobar que los archivos colocados son los originales: `dvc add data/raw/kaggle` recalcula el
+  hash y `git diff --exit-code data/raw/kaggle.dvc` no muestra cambios si coinciden. `dvc status`
+  no sirve para esto en un clon nuevo: sin caché local responde "not in cache" tanto con los
+  archivos originales como con uno alterado (se comprobó durante la verificación final).
 
 ### D3. Sin MLflow en este laboratorio
 - **Decisión:** la comparación de modelos y la regla de reemplazo se registran en archivos de métricas
