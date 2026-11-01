@@ -1,7 +1,7 @@
 PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python)
 export PYTHONPATH := src
 
-.PHONY: test origen ingesta preparar backtest entrenar
+.PHONY: test origen ingesta preparar backtest entrenar publicar reproducir
 
 test:
 	$(PYTHON) -m pytest -q
@@ -24,3 +24,11 @@ backtest:
 # Retador contra vigente con la regla de promoción: make entrenar SNAPSHOT=2017-06-05
 entrenar:
 	$(PYTHON) -m inventario.modelos.entrenar $(SNAPSHOT)
+
+# Pronóstico y pedido sugerido del corte con el modelo vigente: make publicar CORTE=2017-07-17
+publicar:
+	$(PYTHON) -m inventario.publicacion.publicar $(CORTE)
+
+# Recalcula una publicación y la compara con la publicada: make reproducir CORTE=2017-07-17
+reproducir:
+	$(PYTHON) -m inventario.publicacion.reproducir $(CORTE)

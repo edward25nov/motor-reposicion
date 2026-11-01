@@ -1,5 +1,5 @@
 # Costos de negocio por unidad vendida. Cambiarlos cambia el pedido sugerido sin tocar el código.
-# Decisiones en DECISIONES.md (D21).
+# Decisiones en DECISIONES.md (D21 y D26).
 #
 # costo_faltante: margen perdido (y cliente insatisfecho) por cada unidad que se pudo vender y no había.
 # costo_sobrante: costo de cada unidad que sobra al final del periodo (merma si es perecedero,
@@ -16,3 +16,10 @@ grupos:
     familias: [PRODUCE, DAIRY, MEATS, POULTRY, SEAFOOD, BREAD/BAKERY, DELI, EGGS, PREPARED FOODS]
     costo_faltante: 0.30
     costo_sobrante: 0.25     # proporción crítica 0.55: la merma pesa casi tanto como el faltante
+
+# Pedido semanal (D26). El pedido del lunes T llega en T + dias_hasta_entrega y debe cubrir la
+# demanda hasta que llegue el siguiente: dias_cobertura días. Debe caber en el horizonte.
+pedido:
+  dias_hasta_entrega: 2      # el pedido del lunes llega el miércoles
+  dias_cobertura: 7          # cubre de miércoles a martes
+  inventario_disponible: 0   # las tiendas no informan inventario: se pide la cantidad completa

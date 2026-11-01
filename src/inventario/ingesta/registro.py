@@ -4,6 +4,7 @@ Una fila por archivo recibido (fuente, clave, llegada). La carga histórica usa
 clave = llegada = "historico". Se guarda en data/ingesta/registro.db (SQLite).
 """
 
+import hashlib
 import sqlite3
 from pathlib import Path
 
@@ -82,3 +83,24 @@ def vigentes(con, fuente: str, corte: str) -> pd.DataFrame:
 def correcciones(con, desde: str, hasta: str) -> pd.DataFrame:
     """Correcciones que llegaron en el rango [desde, hasta]: datos ya usados que cambiaron."""
     return tabla(con, "tipo='correccion' AND estado='valido' AND llegada BETWEEN ? AND ?", (desde, hasta))
+
+
+def huella_entradas(con, corte: str) -> dict:
+    """Identifica exactamente qué datos estaban disponibles al corte.
+
+    Lista, por fuente, la carga histórica y la versión válida de cada archivo de la bandeja con
+    llegada <= corte, y resume todo en un hash. Si una corrección llega después, la huella del
+    corte no cambia.
+    """
+    filas = pd.read_sql_query(
+        "SELECT a.fuente, a.clave, a.llegada, a.hash FROM archivos a "
+        "JOIN (SELECT fuente, clave, MAX(llegada) AS llegada FROM archivos "
+        "      WHERE estado='valido' AND (llegada<=? OR llegada=?) GROUP BY fuente, clave) v "
+        "ON a.fuente=v.fuente AND a.clave=v.clave AND a.llegada=v.llegada "
+        "ORDER BY a.fuente, a.clave", con, params=(corte, HISTORICO))
+    texto = "\n".join("|".join(f) for f in filas.itertuples(index=False, name=None))
+    return {
+        "hash": hashlib.md5(texto.encode()).hexdigest(),
+        "archivos": int(len(filas)),
+        "ultima_llegada": filas.loc[filas["llegada"] != HISTORICO, "llegada"].max(),
+    }

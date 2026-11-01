@@ -149,3 +149,10 @@ def test_backtest_compara_en_los_mismos_cortes(proyecto):
     assert cortes["baseline"] == cortes["gbm"]                      # mismos cortes para ambos
     assert json.loads((proyecto / "data" / "reportes" / "backtest" / "snapshot=2017-07-31" /
                        "resumen.json").read_text())["decision_gbm_vs_baseline"]["motivo"]
+
+
+def test_gbm_pronostica_una_tienda_que_no_vio_al_entrenar(tabla):
+    entreno = tabla[(tabla["corte"] < "2017-06-26") & (tabla["store_nbr"] != 3)]
+    prueba = tabla[tabla["corte"] >= "2017-06-26"]
+    pred = GBMCuantiles(Q, cfg_rapido()["gbm"]).ajustar(entreno).predecir(prueba)
+    assert pred.loc[prueba["store_nbr"] == 3].notna().all().all()

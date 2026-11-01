@@ -91,4 +91,16 @@ El backtest deja en `data/reportes/backtest/snapshot=<fecha>/` las métricas por
 cuantiles, la ventana y la regla de reemplazo están en `configs/modelo.yaml`; los costos de
 negocio, en `configs/negocio.yaml`. Decisiones y resultados en `DECISIONES.md` (D19 a D24).
 
+## Pronóstico y pedido sugerido
+
+```bash
+make publicar CORTE=2017-07-17     # requiere make preparar del corte y un modelo vigente
+make reproducir CORTE=2017-07-17   # recalcula y compara con lo publicado
+```
+
+Cada corte se publica una sola vez en `data/publicado/corte=<fecha>/`: `pronostico.parquet`
+(cuantiles P10 a P95 por tienda, familia y día), `pedido.csv` (cantidad sugerida por tienda y
+familia para la semana de miércoles a martes) y `manifest.json` (commit, modelo, configuración y
+huella de los datos usados). Decisiones en `DECISIONES.md` (D25 a D28).
+
 Las instrucciones para levantar y ejecutar el producto se agregarán en este archivo.
