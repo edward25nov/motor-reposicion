@@ -2,9 +2,9 @@
 
 Distingue dos cosas:
 - errores: el archivo no puede usarse y va a cuarentena (esquema roto, tipos inválidos,
-  negativos, duplicados, fechas que no corresponden, tiendas o familias desconocidas con ventas).
+  negativos, duplicados, fechas que no corresponden).
 - advertencias: situaciones esperadas del negocio que no detienen nada (petróleo nulo, tiendas
-  que no reportan, filas de tiendas que aún no abren, columnas de más).
+  que no reportan, tiendas aún no anunciadas, familias nuevas, columnas de más).
 
 No lee ni escribe archivos: recibe un DataFrame y devuelve el resultado.
 """
@@ -125,27 +125,23 @@ def validar(fuente: str, clave: str | None, df: pd.DataFrame, contexto: Contexto
             r.errores.append(f"{int(ajenas.sum())} filas con fecha distinta a {clave}")
 
     if fuente in POR_TIENDA and contexto.tiendas:
+        # Una tienda que todavía no se anunció es una situación del negocio (abre una tienda y el
+        # maestro llega después): sus filas se guardan y la preparación las usa cuando la tienda
+        # aparece en el maestro. Descartarlas las perdería para siempre.
         desconocida = ~datos["store_nbr"].isin(contexto.tiendas)
         if desconocida.any():
-            col = NO_NEGATIVOS[fuente]
-            # Ventas o tickets de una tienda que nadie anunció rompen la integridad del dato.
-            # Una promoción es un plan: se descarta esa fila sin invalidar el resto del archivo.
-            con_actividad = desconocida & (datos[col] > 0)
-            if con_actividad.any() and fuente != "promociones":
-                r.errores.append("tiendas desconocidas con actividad: "
-                                 f"{_lista(datos.loc[con_actividad, 'store_nbr'].unique())}")
-            else:
-                r.advertencias.append("filas de tiendas aún no anunciadas, se descartan: "
-                                      f"{_lista(datos.loc[desconocida, 'store_nbr'].unique())}")
-                datos = datos[~desconocida]
+            r.advertencias.append(f"tiendas aún no anunciadas ({int(desconocida.sum())} filas, se guardan): "
+                                  f"{_lista(datos.loc[desconocida, 'store_nbr'].unique())}")
         faltantes = contexto.tiendas - set(datos["store_nbr"])
         if faltantes and fuente != "transacciones":
             r.advertencias.append(f"tiendas sin datos: {_lista(faltantes)}")
 
     if fuente in POR_FAMILIA and contexto.familias:
+        # Una familia nueva se pronostica igual: el modelo la trata como categoría no vista (D28)
+        # y recibe los costos por defecto.
         desconocidas = set(datos["family"]) - contexto.familias
         if desconocidas:
-            r.errores.append(f"familias desconocidas: {_lista(desconocidas)}")
+            r.advertencias.append(f"familias nuevas: {_lista(desconocidas)}")
 
     if not r.errores:
         r.datos = datos.reset_index(drop=True)

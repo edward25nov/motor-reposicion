@@ -31,8 +31,6 @@ def test_archivo_correcto():
     (pd.concat([ventas(), ventas().iloc[[0]]]), "duplicadas"),
     (ventas(date=["2017-07-03", "2017-07-04", "2017-07-03", "2017-07-03"]), "fecha distinta"),
     (ventas(sales=["10", "abc", "1", "2"]), "tipo inválido"),
-    (ventas(store_nbr=[1, 1, 9, 9]), "tiendas desconocidas con actividad: 9"),
-    (ventas(family=["BEVERAGES", "LIQUOR", "BEVERAGES", "PRODUCE"]), "familias desconocidas: LIQUOR"),
     (ventas(sales=[10.0, None, 5.5, 3.0]), "valores nulos"),
 ])
 def test_errores_van_a_cuarentena(df, mensaje):
@@ -41,18 +39,24 @@ def test_errores_van_a_cuarentena(df, mensaje):
     assert any(mensaje in e for e in r.errores), r.errores
 
 
-def test_tienda_sin_anunciar_en_cero_se_descarta_con_advertencia():
-    df = pd.concat([ventas(), ventas(store_nbr=[3, 3, 4, 4], sales=[0.0] * 4)])
+def test_tienda_no_anunciada_se_guarda_con_advertencia():
+    """Una tienda nueva con ventas no invalida el día: sus filas se guardan para usarlas al anunciarse."""
+    df = pd.concat([ventas(), ventas(store_nbr=[9, 9, 10, 10], sales=[5.0, 1.0, 0.0, 2.0])])
     r = validar("ventas", "2017-07-03", df, CONTEXTO)
-    assert r.valido and set(r.datos["store_nbr"]) == {1, 2}
-    assert any("aún no anunciadas" in a for a in r.advertencias)
+    assert r.valido and set(r.datos["store_nbr"]) == {1, 2, 9, 10}
+    assert any("tiendas aún no anunciadas (4 filas, se guardan): 9, 10" in a for a in r.advertencias)
 
 
-def test_promocion_de_tienda_sin_anunciar_no_invalida_el_archivo():
+def test_promocion_de_tienda_no_anunciada_se_guarda():
     df = ventas(store_nbr=[1, 1, 3, 3]).rename(columns={"sales": "onpromotion"})
     df["onpromotion"] = [0, 2, 1, 0]
     r = validar("promociones", "2017-07-03", df, CONTEXTO)
-    assert r.valido and set(r.datos["store_nbr"]) == {1}
+    assert r.valido and set(r.datos["store_nbr"]) == {1, 3}
+
+
+def test_familia_nueva_es_advertencia():
+    r = validar("ventas", "2017-07-03", ventas(family=["BEVERAGES", "LIQUOR", "BEVERAGES", "PRODUCE"]), CONTEXTO)
+    assert r.valido and r.advertencias == ["familias nuevas: LIQUOR"]
 
 
 def test_tienda_que_no_reporta_es_advertencia():
