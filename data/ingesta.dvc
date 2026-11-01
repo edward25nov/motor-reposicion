@@ -1,0 +1,6 @@
+outs:
+- md5: 422144781fa43bd8fe1ac225fd7a87c2.dir
+  size: 18749380
+  nfiles: 671
+  hash: md5
+  path: ingesta
