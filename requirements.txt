@@ -1,6 +1,9 @@
-pandas>=2.2
-pyarrow>=16
-scikit-learn>=1.5
-pyyaml>=6.0
-joblib>=1.4
-pytest>=8.0
+# Versiones fijadas a las restricciones de Airflow 3.3.2 (Python 3.12): el código, el CI y la
+# imagen de Airflow usan exactamente las mismas, así un modelo entrenado en uno carga en el otro.
+pandas==3.0.5
+numpy==2.5.3
+pyarrow==25.0.1
+scikit-learn==1.9.1
+scipy==1.18.1
+PyYAML==6.0.3
+joblib==1.6.0
