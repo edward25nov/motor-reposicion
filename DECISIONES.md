@@ -660,8 +660,9 @@ fecha lógica.
   11 cortes. La frescura de las demás fuentes hace visible una degradación que antes era
   silenciosa: si las promociones dejan de llegar, el modelo recibe la variable vacía, un caso que
   no vio al entrenar. Con la bandeja simulada ocurre al final del periodo: en los cortes
-  2017-08-07 y 2017-08-14 solo el 57 % y el 7 % del horizonte tiene promociones, porque Kaggle
-  termina el 2017-08-15.
+  2017-08-07 y 2017-08-14 solo el 57 % y el 7 % del horizonte tiene promociones. Es esperado y
+  no es una falla: `train.csv` termina el 2017-08-15 y `test.csv`, que trae las promociones de las
+  fechas siguientes, queda fuera del laboratorio por el enunciado.
 
 ### D39. Lo que queda como trabajo futuro
 - **Evaluar los modelos con el costo del pedido semanal.** La regla de reemplazo (D23) compara el

@@ -168,7 +168,9 @@ Qué pasa en cada situación:
   motivo en `data/procesados/calidad/` y en el seguimiento, y el lunes siguiente se vuelve a
   intentar.
 - **Faltan promociones o transacciones:** se pronostica igual y el reporte de calidad lo advierte;
-  la variable queda vacía para esos días.
+  la variable queda vacía para esos días. Con los datos de Kaggle esto ocurre, de forma esperada, en los cortes
+  2017-08-07 y 2017-08-14: `train.csv` termina el 2017-08-15 y `test.csv`, que trae las promociones
+  posteriores, queda fuera del laboratorio por el enunciado.
 - **Total diario de una tienda muy lejos de lo habitual:** advertencia de atípico (D38).
 - **Fechas posteriores a la última llegada de la bandeja:** las corridas se omiten (D36).
 
@@ -341,7 +343,13 @@ Kaggle. Para comprobar que los CSV colocados son los originales, sin acceso al r
 dvc add data/raw/kaggle && git diff --exit-code data/raw/kaggle.dvc
 ```
 
-Si no muestra diferencias, su hash coincide con la versión registrada. (`dvc status` no sirve en un
+Si no muestra diferencias, su hash coincide con la versión registrada. Sin DVC instalado en el
+equipo, la misma comprobación se hace dentro del contenedor (con Airflow levantado):
+
+```bash
+docker compose -f airflow/docker-compose.yaml exec airflow-scheduler bash -c "cd /opt/motor && dvc add data/raw/kaggle" \
+  && git diff --exit-code data/raw/kaggle.dvc
+``` (`dvc status` no sirve en un
 clon nuevo: sin caché local responde "not in cache" tanto con los archivos originales como con
 otros; se comprobó.)
 
