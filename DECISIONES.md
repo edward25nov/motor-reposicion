@@ -26,7 +26,7 @@ están marcadas con su tema.
   - D14. Corte semanal los lunes y horizonte de 14 días
   - D15. La disponibilidad esperada de cada fuente es configuración del producto — *disponibilidad en el tiempo*
   - D16. Features directas por horizonte, sin pronóstico recursivo
-  - D17. Datos faltantes al corte: seguir si es posible, detenerse si las ventas están muy atrasadas — *validación de datos*
+  - D17. Datos faltantes al corte: seguir si es posible, no publicar si las ventas están muy atrasadas — *validación de datos*
   - D18. Entrenamiento con cortes del pasado sobre una sola vista de los datos — *disponibilidad en el tiempo*
 - **Modelado**
   - D19. Baseline: ingenuo estacional con cuantiles empíricos
@@ -50,6 +50,8 @@ están marcadas con su tema.
   - D35. Seguimiento del desempeño con las ventas conocidas a la fecha — *manejo de correcciones*
   - D36. El fin de la operación simulada se detecta por los datos, no por fechas fijas
   - D37. Límite de hilos para el entrenamiento dentro de Airflow
+  - D38. Reporte de calidad por corte: frescura de todas las fuentes y totales atípicos — *validación de datos*
+  - D39. Lo que queda como trabajo futuro
 
 ## Infraestructura y versionado
 
@@ -175,20 +177,24 @@ La ingesta (`src/inventario/ingesta/`, `make ingesta CORTE=AAAA-MM-DD`) lleva la
 ### D10. Errores contra advertencias *(validación de datos)*
 - **Decisión:** un archivo va a **cuarentena** (no se usa nunca) si: le faltan columnas, está vacío
   o no se puede leer, tiene valores con tipo inválido o nulos en columnas obligatorias, ventas,
-  promociones o transacciones negativas, filas duplicadas por su llave, fechas que no corresponden
-  a su clave, ventas o transacciones de una tienda no anunciada, o familias desconocidas.
-  Son **advertencias** (el archivo se usa): precio del petróleo nulo, tiendas que no reportan ese
-  día, columnas de más, filas de tiendas aún no anunciadas sin actividad (se descartan) y
-  promociones de una tienda aún no anunciada (se descartan esas filas).
+  promociones o transacciones negativas, filas duplicadas por su llave o fechas que no corresponden
+  a su clave. Son **advertencias** (el archivo se usa): precio del petróleo nulo, tiendas que no
+  reportan ese día, columnas de más, filas de una tienda que todavía no se anunció en el maestro
+  (se guardan) y familias nuevas.
 - **Alternativas:** rechazar solo las filas malas y usar el resto del archivo; validar con una
   librería como pandera.
 - **Justificación:** un archivo con negativos o duplicados indica un problema del proceso que lo
   generó; usar "lo que se salve" mezclaría datos de una versión defectuosa con datos buenos. Se
   rechaza completo y se espera el reenvío. Las advertencias corresponden a situaciones normales del
   negocio (en Kaggle, el petróleo no tiene precio algunos días y las tiendas tienen filas en cero
-  antes de abrir) y por el enunciado no deben provocar fallas. Una promoción es un plan: que nombre
-  una tienda que aún no existe no invalida las promociones de las demás. Las reglas son pocas y
-  explícitas, así que una función propia con pruebas es más clara que una dependencia nueva.
+  antes de abrir) y por el enunciado no deben provocar fallas. Una tienda que abre antes de que
+  llegue su registro al maestro, o una familia nueva, también lo son: mandar a cuarentena el
+  archivo del día completo perdería las ventas de todas las demás tiendas y podría dejar el corte
+  sin datos. Por eso sus filas se guardan en `validos/` con una advertencia: la preparación usa una
+  tienda cuando aparece en el maestro (con sus ventas anteriores, sin necesitar un reenvío) y una
+  familia nueva se pronostica como categoría no vista (D28) con los costos por defecto. Hay
+  pruebas para ambos casos. Las reglas son pocas y explícitas, así que una función propia con
+  pruebas es más clara que una dependencia nueva.
 
 ### D11. Un archivo inválido no hace fallar la ingesta; una carga histórica inválida sí *(validación de datos)*
 - **Decisión:** un archivo inválido de la bandeja queda en cuarentena, se reporta y la tarea
@@ -209,6 +215,13 @@ La ingesta (`src/inventario/ingesta/`, `make ingesta CORTE=AAAA-MM-DD`) lleva la
 - **Justificación:** distinguir un reenvío de una corrección importa: un reenvío trae un dato que
   nunca se usó, una corrección cambia un dato que ya pudo alimentar un pronóstico publicado y el
   seguimiento del desempeño.
+- **Una llegada ya procesada es inmutable por contrato:** si el archivo de una carpeta
+  `llegada=…` cambia después de haberse recibido, se conserva la versión original y el reporte de
+  ingesta lo lista en `modificados_despues_de_recibidos`. Reprocesarlo cambiaría la huella de
+  datos de cortes ya publicados (D27); una corrección legítima llega como archivo nuevo en una
+  llegada posterior. Los archivos que no siguen el contrato de nombres
+  (`llegada=AAAA-MM-DD/<fuente>_<clave>.csv`) tampoco se ignoran en silencio: se listan en
+  `no_reconocidos`.
 
 ### D13. Lectura "as-of" desde el registro *(disponibilidad en el tiempo y manejo de correcciones)*
 - **Decisión:** `vigente.leer(fuente, corte)` devuelve la carga histórica más, para cada clave de la
@@ -265,18 +278,23 @@ Los parámetros están en `configs/preparacion.yaml`.
   no acumula errores de un día al siguiente y entrena una sola vez. Trabajar en logaritmo reduce el
   peso de las series grandes y la asimetría de las ventas.
 
-### D17. Datos faltantes al corte: seguir si es posible, detenerse si las ventas están muy atrasadas *(validación de datos)*
+### D17. Datos faltantes al corte: seguir si es posible, no publicar si las ventas están muy atrasadas *(validación de datos)*
 - **Decisión:** las medias ignoran los días sin dato (por un archivo atrasado o en cuarentena) y la
   tabla registra `cobertura_7`. El reporte `data/procesados/calidad/corte=T.json` lista los días sin
-  ventas de la última semana. Si la última venta disponible es anterior a T − 1 − 3 días, la
-  preparación falla con `DatosInsuficientes` y no se pronostica.
-- **Alternativas:** no pronosticar si falta cualquier día; rellenar con ceros.
+  ventas de la última semana. Si la última venta disponible es anterior a T − 1 − 3 días, el corte
+  **no se publica**: la tarea `datos_suficientes` del DAG semanal lo omite (*skipped*) y el reporte
+  de calidad queda con `publicado: false` y el motivo; el seguimiento lo lista en "Cortes sin
+  publicación". El lunes siguiente se vuelve a intentar con lo que haya llegado.
+- **Alternativas:** no pronosticar si falta cualquier día; rellenar con ceros; fallar la tarea.
 - **Justificación:** que falte un día por un atraso o un reenvío es una situación esperada del
   negocio y no debe impedir el pedido semanal; rellenar con ceros simularía una caída de ventas
-  que no ocurrió. Pero sin ventas de casi una semana el pedido se basaría en información vieja:
-  es preferible fallar de forma visible (Airflow reintenta y alerta) que publicar una
-  recomendación poco confiable. Con la bandeja simulada esto ocurre, por ejemplo, en el corte
-  2017-07-03: falta el 1 de julio (archivo en cuarentena) y la preparación sigue.
+  que no ocurrió. Sin ventas de casi una semana, en cambio, el pedido se basaría en información
+  vieja y es preferible no publicarlo. La primera versión hacía fallar la tarea para que el
+  problema fuera visible; la revisión mostró que, con `depends_on_past`, una sola falla bloqueaba
+  todos los lunes siguientes y exigía intervención manual. Omitir el corte con su motivo escrito
+  lo mantiene visible sin detener la operación (prueba `test_una_semana_sin_ventas_no_publica_y_luego_se_recupera`).
+  Con la bandeja simulada, el corte 2017-07-03 tiene un día faltante (archivo en cuarentena) y se
+  publica normalmente.
 
 ### D18. Entrenamiento con cortes del pasado sobre una sola vista de los datos *(disponibilidad en el tiempo)*
 - **Decisión:** `preparar.entrenamiento(snapshot, desde, hasta)` lee los datos conocidos en
@@ -380,15 +398,15 @@ de negocio, en `configs/negocio.yaml`. `make backtest SNAPSHOT=…` compara los 
 - **Decisión:** `make entrenar SNAPSHOT=S` reserva los últimos 4 cortes evaluables de S, entrena el
   retador (GBM) solo con lo conocido antes de esa reserva y lo compara con el vigente en esos cortes.
   Si todavía no hay vigente, el baseline entrenado con las mismas filas es el vigente inicial. Cada
-  versión queda en `models/<version>/modelo.joblib` y en `models/registro.json` con su ventana, los
+  versión queda en `models/<version>/modelo.pkl.gz` (D34) y en `models/registro.json` con su ventana, los
   cortes de evaluación, el costo, el commit de Git, la decisión y el motivo. El modelo promovido no
   se vuelve a entrenar con los cortes reservados.
 - **Alternativas:** volver a entrenar el ganador con todos los datos antes de usarlo.
 - **Justificación:** el modelo que se usa es exactamente el que se evaluó, lo que hace la decisión
   trazable y reproducible. El costo es que el modelo vigente no vio las últimas ~6 semanas (4
-  cortes reservados más su horizonte); con un reentrenamiento periódico ese atraso no crece. Con
-  los datos reales, el primer entrenamiento (S = 2017-06-05) dejó al baseline como vigente inicial
-  y promovió al GBM: 19.0 % menos costo, ganó los 4 cortes, cobertura 86.1 %.
+  cortes reservados más su horizonte); con un reentrenamiento periódico ese atraso no crece. En la
+  operación con Airflow, el primer entrenamiento (S = 2017-06-05) dejó al baseline como vigente
+  inicial y promovió al GBM: 19.5 % menos costo, ganó los 4 cortes, cobertura 87.0 %.
 - **Medición del costo de no reentrenar:** se comparó el mismo GBM entrenado hasta el 2017-04-23
   (como queda con esta decisión) contra uno reentrenado con todo lo conocido al 2017-06-05, en los
   9 cortes del 2017-06-05 al 2017-07-31, que ninguno vio:
@@ -460,6 +478,14 @@ están en `configs/negocio.yaml` (sección `pedido`).
   correcciones, y la reproducción da exactamente el mismo resultado: con los datos reales, el
   corte 2017-07-03 se reproduce con diferencia 0 aunque el reenvío de las ventas del 1 de julio
   llegó el 4.
+- **Qué versión de los datos se usa al reproducir:** el `data/ingesta.dvc` que se recupera es el
+  de la corrida completa (posterior al corte), no uno tomado el mismo día de la publicación. Es
+  válido porque la lectura as-of filtra por llegada ≤ corte y el registro conserva cada versión de
+  cada archivo; la reproducción lo verifica comparando la huella de datos con la del manifest.
+- **Código con cambios sin commit:** el manifest registra `git_cambios_sin_commit`, que revisa solo
+  el código y la configuración (`src`, `dags`, `configs`, `requirements.txt` y los archivos de
+  Airflow). Los punteros `.dvc` quedan fuera porque los modifica el propio flujo en cada corte; si
+  se incluyeran, el indicador estaría siempre encendido (hay una prueba para eso).
 
 ### D28. Tiendas o categorías que el modelo no vio al entrenar
 - **Decisión:** una categoría desconocida (por ejemplo, una tienda nueva) entra al GBM como valor
@@ -484,8 +510,8 @@ fecha lógica.
 - **Alternativas:** reutilizar el compose de la clase 4; dejar las versiones libres.
 - **Justificación:** el compose de la clase 4 no fija `name:`, así que Docker usa el nombre de la
   carpeta (`airflow`) y dos proyectos compartirían el volumen de Postgres (comprobado: el volumen
-  `airflow_postgres-db-volume` ya existía). Con versiones idénticas, un modelo serializado con
-  joblib carga igual en el equipo, en el CI y en Airflow, y los resultados son reproducibles.
+  `airflow_postgres-db-volume` ya existía). Con versiones idénticas, un modelo serializado (D34)
+  carga igual en el equipo, en el CI y en Airflow, y los resultados son reproducibles.
   Montar la bandeja en solo lectura hace cumplir, a nivel del sistema operativo, que el flujo
   nunca la modifique.
 
@@ -513,8 +539,11 @@ fecha lógica.
   modelos o el caché de DVC.
 
 ### D32. Orden, backfill y modelo vigente "as-of" *(disponibilidad en el tiempo)*
-- **Decisión:** todas las tareas usan `depends_on_past=True` (un corte espera al anterior) y el
-  periodo se ejecuta con `airflow backfill create --reprocess-behavior failed` (corre las fechas
+- **Decisión:** las tareas que escriben estado dependiente del orden usan `depends_on_past=True`:
+  la ingesta (el tipo de cada archivo depende de las versiones anteriores) y
+  `entrenar_si_corresponde` (cuándo toca reentrenar y contra qué vigente se compara). Preparar,
+  publicar, versionar y el seguimiento no lo usan: leen "as-of" y su resultado no depende de que la
+  corrida anterior haya terminado. El periodo se ejecuta con `airflow backfill create --reprocess-behavior failed` (corre las fechas
   pendientes y reintenta las fallidas, sin rehacer las exitosas). `make operar` crea primero los
   backfills y después activa los DAGs. Además, el modelo que usa un corte T es el vigente "as-of":
   la última versión aprobada con snapshot ≤ T (`registro.vigente_al`).
@@ -524,13 +553,15 @@ fecha lógica.
   del pasado. El modelo "as-of" es la defensa de fondo: aunque algo corra fuera de orden, un pedido
   de junio nunca se calcula con un modelo entrenado con datos de julio (hay una prueba que lo
   verifica). Es el principio fundamental del enunciado aplicado también al modelo, no solo a los
-  datos. Lo que pasa después del fin de los datos se resuelve en D36.
+  datos. Limitar `depends_on_past` a esas dos tareas evita que un corte omitido o fallido bloquee
+  los siguientes (D17). Lo que pasa después del fin de los datos se resuelve en D36.
 
 ### D33. Reentrenamiento cada 4 semanas y versionado con DVC dentro del flujo
 - **Decisión:** el DAG semanal entrena un retador si no hay modelo vigente o si pasaron 4 semanas
   desde el último (`configs/modelo.yaml`, `reentrenar_cada_semanas`), y aplica la regla de D23. Al
-  final, `versionar` ejecuta `dvc add` de `data/ingesta`, `data/procesados`, `models` y
-  `data/publicado`, y `dvc push` solo si hay credenciales del remoto en `.dvc/config.local`.
+  final, `versionar` ejecuta `dvc add` de `data/ingesta`, `data/procesados`, `models`,
+  `data/publicado` y `data/reportes`, y `dvc push` solo si hay credenciales del remoto en
+  `.dvc/config.local`.
 - **Alternativas:** reentrenar a mano; versionar con DVC solo desde el equipo del desarrollador.
 - **Justificación:** D24 midió que el modelo pierde poco por no ver las últimas semanas; 4 semanas
   limitan ese atraso sin entrenar cada lunes. Versionar dentro del flujo cumple que los datos
@@ -538,6 +569,10 @@ fecha lógica.
   Quien evalúa no tiene credenciales de DagsHub: en ese caso los datos quedan en el caché local de
   DVC y el flujo sigue. El flujo no hace commits a Git; fijar una versión (los punteros `.dvc`) es
   un commit del desarrollador.
+- **Copias en `docs/evidencias/`:** el repositorio guarda copias pequeñas (unos pocos KB) del
+  resumen del backtest, el registro de modelos y el reporte de seguimiento, más las capturas de
+  Airflow, como evidencia legible para quien evalúa sin acceso al remoto. No son datos de
+  entrada ni del flujo: la fuente es lo versionado con DVC.
 
 ### D34. Los modelos se guardan con el pickler estándar, no con joblib
 - **Decisión:** `models/<version>/modelo.pkl.gz` se escribe con `pickle.dump` (el pickler en C de
@@ -559,9 +594,10 @@ fecha lógica.
   pinball, cobertura P10–P90 y costo diario, por corte y por semana del horizonte. El pedido se
   evalúa cuando hay ventas de **todos** los días de su cobertura (no basta con que haya pasado la
   fecha: un día atrasado o en cuarentena todavía no se conoce): nivel de servicio, faltante,
-  sobrante y costo, por grupo (perecederos y no perecederos), y contra una regla de referencia que
-  imita al gerente sin modelo: pedir lo vendido la semana anterior al corte. Escribe
-  `data/reportes/seguimiento/al=<T>/` con tres CSV y `reporte.html`.
+  sobrante y costo, por grupo de costos de `configs/negocio.yaml` (perecederos y no perecederos),
+  y contra una regla de referencia que imita al gerente sin modelo: pedir lo vendido la semana
+  anterior al corte. También lista los cortes que no se publicaron (D17) con su motivo. Escribe
+  `data/reportes/seguimiento/al=<T>/` con cuatro CSV y `reporte.html`.
 - **Alternativas:** evaluar solo una vez, cuando termina el horizonte; comparar solo con el baseline.
 - **Justificación:** el contexto pide informar "qué tan acertadas fueron las sugerencias
   anteriores" a medida que se conocen las ventas, así que la evaluación se actualiza cada día y
@@ -569,14 +605,19 @@ fecha lógica.
   regla de referencia responde la pregunta de negocio: ¿el sistema ordena mejor que la práctica
   actual? Como cada reporte depende solo de lo publicado hasta T y de los datos conocidos en T, es
   reproducible.
+- **Archivos parciales:** si el archivo de ventas de un día llega incompleto (faltan tiendas) y
+  todavía no llegó su corrección, ese día cuenta como conocido y las tiendas ausentes suman cero en
+  la venta real de la semana. Cuando llega la corrección, la evaluación se recalcula sola.
 
 ### D36. El fin de la operación simulada se detecta por los datos, no por fechas fijas
 - **Decisión:** cada DAG empieza con una tarea `en_operacion` (`@task.short_circuit`). La ingesta y
   el seguimiento se omiten si la fecha es posterior a la última llegada de la bandeja; el pronóstico
   se omite si el origen nunca llegó a tener ventas lo bastante recientes para el corte
   (`operacion.hay_ventas_para_corte`). Una corrida omitida termina en *skipped*, no en error. Dentro
-  del periodo, si faltan ventas que sí debían llegar, la preparación sigue fallando con
-  `DatosInsuficientes` (D17).
+  del periodo, si faltan ventas que sí debían llegar, el corte también se omite, pero por
+  `datos_suficientes` (D17), con otro mensaje en el log ("DATOS INSUFICIENTES, el corte no se
+  publica") y registro en el reporte de calidad y en el seguimiento: así se distingue "terminó la
+  operación" de "este corte no se pudo publicar".
 - **Alternativas:** `end_date` fijo en los DAGs, leído de una variable de entorno.
 - **Justificación:** se probó primero con `end_date` por variable de entorno y falló de dos formas
   observadas: el backfill de Airflow ignora el `end_date` (creó el corte del 2017-08-21, sin ventas)
@@ -584,8 +625,8 @@ fecha lógica.
   contenedor aún no tenía, quedó sin `end_date` y Airflow programó una corrida con fecha
   2026-10-26 que intentó entrenar. La guarda por datos no depende de la configuración ni de cómo se
   dispare la corrida (backfill, programada o manual) y sirve para cualquier periodo que se ejecute.
-  Distingue "ya no hay más datos en el origen" (se omite) de "faltan datos que debían llegar" (se
-  alerta). En producción la bandeja no termina y la guarda no omitiría nada.
+  Distingue "ya no hay más datos en el origen" de "faltan datos que debían llegar". En producción
+  la bandeja no termina y esta guarda no omitiría nada.
 
 ### D37. Límite de hilos para el entrenamiento dentro de Airflow
 - **Decisión:** el compose fija `OMP_NUM_THREADS=4` y sube
@@ -599,3 +640,36 @@ fecha lógica.
   límite: el límite no cuesta tiempo y deja CPU libre. El reintento resolvió el síntoma, pero
   depender de él haría que en un equipo con menos recursos la tarea fallara de forma repetida. Los
   resultados no cambian: el pronóstico usa el modelo ya guardado.
+
+### D38. Reporte de calidad por corte: frescura de todas las fuentes y totales atípicos *(validación de datos)*
+- **Decisión:** el reporte `data/procesados/calidad/corte=T.json` incluye, además de las ventas, la
+  cobertura de promociones en el horizonte y la última fecha de transacciones y petróleo, con
+  advertencias si están atrasadas. También marca como **atípico** el total diario de una tienda de
+  la última semana que se aleja más de 5 veces (`configs/preparacion.yaml`, `factor_atipico`) de la
+  mediana del mismo día de la semana en las 8 semanas previas, salvo que sea feriado para esa
+  tienda. Son advertencias: aparecen en el log y en el reporte, pero no impiden publicar.
+- **Alternativas:** mandar a cuarentena los valores atípicos; comparar contra la media de 28 días.
+- **Justificación:** un corrimiento decimal o una venta ×100 pasan la validación de tipos y rangos
+  y alimentarían el pedido sin que nadie lo note. No se mandan a cuarentena porque una apertura,
+  un evento o un cierre pueden producir totales legítimos muy distintos; comparar con el mismo día
+  de la semana y excluir feriados reduce los falsos positivos (hay pruebas para un ×100, que se
+  marca, y para un feriado, que no). Con los datos reales no se marcó ningún total atípico en los
+  11 cortes. La frescura de las demás fuentes hace visible una degradación que antes era
+  silenciosa: si las promociones dejan de llegar, el modelo recibe la variable vacía, un caso que
+  no vio al entrenar. Con la bandeja simulada ocurre al final del periodo: en los cortes
+  2017-08-07 y 2017-08-14 solo el 57 % y el 7 % del horizonte tiene promociones, porque Kaggle
+  termina el 2017-08-15.
+
+### D39. Lo que queda como trabajo futuro
+- **Evaluar los modelos con el costo del pedido semanal.** La regla de reemplazo (D23) compara el
+  costo del cuantil crítico diario; el producto entrega un pedido semanal. El costo semanal ya se
+  mide en el seguimiento (D35); llevarlo también al backtest haría la comparación más fiel al
+  producto.
+- **Calibrar los intervalos.** La cobertura P10–P90 observada es de 85 % a 90 %, por encima del 80 %
+  nominal (D22, D25). Una calibración conformal sobre los residuos del backtest ajustaría los
+  cuantiles; hoy el exceso favorece al negocio en los no perecederos.
+- **Inventario real.** El pedido supone inventario cero (D26); con datos de inventario y recepción
+  el pedido sería la diferencia con lo disponible.
+- **Recorte de la proporción crítica.** El modelo estima cuantiles de P10 a P95; si los costos
+  llevan la proporción crítica fuera de ese rango, se usa el cuantil más cercano y el log lo
+  advierte. Cubrir proporciones más extremas requiere agregar cuantiles en `configs/modelo.yaml`.
