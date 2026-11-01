@@ -23,7 +23,9 @@ class GBMCuantiles:
     def _entrada(self, tabla: pd.DataFrame) -> pd.DataFrame:
         X = tabla[FEATURES].copy()
         for c in CATEGORICAS:
-            X[c] = pd.Categorical(X[c].astype(str), categories=self.categorias[c])
+            valores = X[c].astype(str)
+            # Una categoría que no se vio al entrenar (p. ej. una tienda nueva) se trata como faltante.
+            X[c] = pd.Categorical(valores.where(valores.isin(self.categorias[c])), categories=self.categorias[c])
         return X
 
     def ajustar(self, tabla: pd.DataFrame) -> "GBMCuantiles":
