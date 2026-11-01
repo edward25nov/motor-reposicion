@@ -3,8 +3,10 @@
 Con los datos conocidos en `snapshot`:
 1. reserva los últimos `semanas_evaluacion` cortes evaluables (horizonte completo observado);
 2. entrena el retador (GBM) solo con filas conocidas al inicio de esa reserva;
-3. si no hay vigente, el baseline entrenado con las mismas filas pasa a ser el vigente inicial;
-4. evalúa retador y vigente en los cortes reservados y aplica la regla de promoción.
+3. si no hay vigente al snapshot, el baseline entrenado con las mismas filas pasa a ser el vigente
+   inicial;
+4. evalúa retador y vigente (el vigente al snapshot, registro.vigente_al) en los cortes reservados
+   y aplica la regla de promoción.
 
 El modelo no se vuelve a entrenar con los cortes reservados: el que se usa es exactamente el que
 se evaluó. Es idempotente: si la versión del snapshot ya está registrada, no hace nada.
@@ -61,7 +63,7 @@ def ejecutar(snapshot: str, cfg_m: dict | None = None) -> dict:
     evaluar = tabla[tabla["corte"].isin(cortes)]
     hasta = entreno["fecha"].max()
 
-    if reg["vigente"] is None:
+    if registro.vigente_al(snapshot, reg) is None:
         base = Baseline(cfg_m["cuantiles"]).ajustar(entreno)
         nombre_base = f"baseline-{snapshot}"
         registro.guardar_modelo(nombre_base, base)
@@ -69,9 +71,8 @@ def ejecutar(snapshot: str, cfg_m: dict | None = None) -> dict:
             **_entrada("baseline", snapshot, hasta, cortes, _evaluar(base, evaluar, cfg_m, cfg_n)),
             "decision": "vigente inicial", "motivo": "no había modelo vigente: el baseline es el piso",
         }
-        reg["vigente"] = nombre_base
 
-    nombre_vigente = reg["vigente"]
+    nombre_vigente = registro.vigente_al(snapshot, reg)
     vigente = registro.cargar_modelo(nombre_vigente)
     retador = GBMCuantiles(cfg_m["cuantiles"], cfg_m["gbm"]).ajustar(entreno)
     pc_retador = _evaluar(retador, evaluar, cfg_m, cfg_n)
@@ -88,9 +89,7 @@ def ejecutar(snapshot: str, cfg_m: dict | None = None) -> dict:
         "decision": "promovido" if promueve else "descartado",
         "motivo": motivo,
     }
-    if promueve:
-        reg["anterior"] = nombre_vigente
-        reg["vigente"] = version
+    reg["vigente"] = registro.vigente_al(pd.Timestamp.max, reg)   # el más reciente, como referencia
     registro.guardar(reg)
     print(f"entrenar {snapshot}: {version} vs {nombre_vigente}: {motivo}. Vigente: {reg['vigente']}")
     return reg

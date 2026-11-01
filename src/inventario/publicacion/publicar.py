@@ -1,6 +1,6 @@
 """Publica el pronóstico y el pedido sugerido de un corte.
 
-Lee las features del corte (make preparar), aplica el modelo vigente y escribe en
+Lee las features del corte (make preparar), aplica el modelo vigente en el corte y escribe en
 data/publicado/corte=<AAAA-MM-DD>/:
     pronostico.parquet   una fila por tienda, familia y día del horizonte, con sus cuantiles
     pedido.csv           cantidad sugerida por tienda y familia para el periodo de cobertura
@@ -58,9 +58,9 @@ def ejecutar(corte: str) -> str:
     features_path = ruta_features(corte)
     if not features_path.is_file():
         raise FileNotFoundError(f"No hay features para {corte}: ejecuta antes la preparación del corte")
-    vigente = registro.vigente()
+    vigente = registro.vigente(corte)
     if vigente is None:
-        raise RuntimeError("No hay modelo vigente: ejecuta antes el entrenamiento (make entrenar)")
+        raise RuntimeError(f"No hay modelo vigente al {corte}: ejecuta antes el entrenamiento (make entrenar)")
     version, modelo = vigente
 
     pron, ped = calcular(pd.read_parquet(features_path), version, modelo)
@@ -73,7 +73,7 @@ def ejecutar(corte: str) -> str:
     manifest = {
         "corte": corte,
         "git_commit": registro.commit_git(),
-        "modelo": {"version": version, "md5": md5(rutas.modelos() / version / "modelo.joblib")},
+        "modelo": {"version": version, "md5": md5(registro.ruta_modelo(version))},
         "datos": entradas,
         "features_md5": md5(features_path),
         "configs_md5": {c: md5(rutas.configs() / f"{c}.yaml") for c in CONFIGS},
