@@ -106,11 +106,32 @@ def test_preparar_un_corte_es_idempotente(ingerido):
     assert (ingerido / "data" / "procesados" / "calidad" / f"corte={CORTE}.json").is_file()
 
 
-def test_ventas_muy_atrasadas_detienen_la_preparacion(datos):
+def test_ventas_muy_atrasadas_no_alcanzan_para_publicar(datos):
     ins = Insumos.desde(fuentes(datos))
-    preparar.calidad(ins, "2017-07-17", CFG)                        # al día
-    with pytest.raises(preparar.DatosInsuficientes):
-        preparar.calidad(ins, "2017-08-10", CFG)                    # última venta: 2017-07-31
+    assert preparar.calidad(ins, "2017-07-17", CFG)["suficiente"]   # al día
+    atrasado = preparar.calidad(ins, "2017-08-10", CFG)             # última venta: 2017-07-31
+    assert not atrasado["suficiente"] and "2017-07-31" in atrasado["motivo"]
+
+
+def _con_venta(datos, tienda, fecha, factor):
+    tr = datos["train"].copy()
+    fila = (tr["store_nbr"] == tienda) & (tr["date"] == fecha)
+    tr.loc[fila, "sales"] = tr.loc[fila, "sales"] * factor + 1000
+    return {**fuentes({**datos, "train": tr})}
+
+
+def test_un_total_diario_100_veces_mayor_es_atipico(datos):
+    raros = preparar.atipicos(Insumos.desde(_con_venta(datos, 1, "2017-07-12", 100)), pd.Timestamp(CORTE), CFG)
+    assert [(r["tienda"], r["fecha"]) for r in raros] == [(1, "2017-07-12")]
+    assert preparar.atipicos(Insumos.desde(fuentes(datos)), pd.Timestamp(CORTE), CFG) == []
+
+
+def test_en_un_feriado_no_se_marca_atipico(datos):
+    f = _con_venta(datos, 1, "2017-07-12", 100)
+    f["feriados"] = pd.concat([f["feriados"], pd.DataFrame({
+        "date": [pd.Timestamp("2017-07-12")], "type": ["Holiday"], "locale": ["National"],
+        "locale_name": ["Ecuador"], "description": ["Feriado de prueba"], "transferred": [False]})])
+    assert preparar.atipicos(Insumos.desde(f), pd.Timestamp(CORTE), CFG) == []
 
 
 def test_entrenamiento_solo_con_objetivos_conocidos(ingerido):
@@ -118,3 +139,10 @@ def test_entrenamiento_solo_con_objetivos_conocidos(ingerido):
     assert t["corte"].dt.day_of_week.eq(0).all()
     assert t["fecha"].max() <= pd.Timestamp("2017-07-02")
     assert t["ventas"].notna().all() and t["family"].dtype == "category"
+
+
+def test_frescura_avisa_si_faltan_promociones_del_horizonte(datos):
+    f = fuentes(datos)
+    f["promociones"] = f["promociones"][f["promociones"]["date"] <= "2017-07-20"]
+    detalle, avisos = preparar.frescura(Insumos.desde(f), pd.Timestamp(CORTE), CFG)
+    assert detalle["promociones_cobertura_horizonte"] < 1 and any("promociones" in a for a in avisos)

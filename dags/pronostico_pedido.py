@@ -1,13 +1,21 @@
 """Pronóstico y pedido sugerido semanal (cada lunes).
 
 1. en_operacion: omite el corte si el origen ya no tiene ventas para él (fin de la operación
-   simulada). Si faltan ventas que sí debían llegar, la preparación falla: eso es una alarma.
+   simulada).
 2. ingestar: pone al día la bandeja hasta el corte (idempotente; no depende del DAG diario).
-3. entrenar_si_corresponde: entrena un retador si no hay modelo vigente o si pasaron 4 semanas
+3. datos_suficientes: si las ventas están demasiado atrasadas, el corte no se publica: queda
+   omitido, con su motivo en el reporte de calidad y en el seguimiento. El lunes siguiente se
+   vuelve a intentar con lo que haya llegado.
+4. entrenar_si_corresponde: entrena un retador si no hay modelo vigente o si pasaron 4 semanas
    desde el último, y aplica la regla de reemplazo.
-4. preparar: features con los datos tal como se conocían en el corte.
-5. publicar: pronóstico, pedido y manifest; un corte ya publicado no se modifica.
-6. versionar: dvc add de ingesta, procesados, modelos y publicaciones (push si hay credenciales).
+5. preparar: features con los datos tal como se conocían en el corte.
+6. publicar: pronóstico, pedido y manifest; un corte ya publicado no se modifica.
+7. versionar: dvc add de ingesta, procesados, modelos, publicaciones y reportes (push si hay
+   credenciales).
+
+Solo ingestar y entrenar_si_corresponde esperan a la corrida anterior (depends_on_past): el
+registro de ingesta y el de modelos dependen del orden. El resto lee "as-of" y no lo necesita, así
+una semana omitida no bloquea las siguientes.
 
 Lógica en src/inventario/.
 """
@@ -23,7 +31,7 @@ from airflow.sdk import dag, task
     start_date=datetime(2017, 6, 5),
     catchup=False,  # el pasado se procesa con backfill (make operar)
     max_active_runs=1,
-    default_args={"depends_on_past": True, "retries": 1, "retry_delay": timedelta(minutes=2), "pool": "motor",
+    default_args={"retries": 1, "retry_delay": timedelta(minutes=2), "pool": "motor",
                   "execution_timeout": timedelta(minutes=45)},
     tags=["motor-reposicion"],
     doc_md=__doc__,
@@ -35,14 +43,20 @@ def pronostico_pedido():
 
         return operacion.hay_ventas_para_corte(fecha)
 
-    @task
+    @task(depends_on_past=True)
     def ingestar(fecha: str) -> int:
         from inventario.ingesta import ingestar
 
         return ingestar.ejecutar(fecha)["archivos"]
 
-    @task
-    def entrenar_si_corresponde(fecha: str, _ingesta: int) -> str:
+    @task.short_circuit
+    def datos_suficientes(fecha: str, _ingesta: int) -> bool:
+        from inventario.preparacion import preparar
+
+        return preparar.verificar(fecha)
+
+    @task(depends_on_past=True)
+    def entrenar_si_corresponde(fecha: str) -> str:
         from inventario import operacion
 
         return operacion.entrenar_si_corresponde(fecha)
@@ -68,7 +82,9 @@ def pronostico_pedido():
     fecha = "{{ ds }}"
     ingesta = ingestar(fecha)
     en_operacion(fecha) >> ingesta
-    versionar(publicar(fecha, preparar(fecha, entrenar_si_corresponde(fecha, ingesta))))
+    modelo = entrenar_si_corresponde(fecha)
+    datos_suficientes(fecha, ingesta) >> modelo
+    versionar(publicar(fecha, preparar(fecha, modelo)))
 
 
 pronostico_pedido()

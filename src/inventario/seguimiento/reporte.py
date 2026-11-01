@@ -22,6 +22,7 @@ th { color:var(--tenue); font-weight:600; }
 """
 
 COLUMNAS = {
+    "motivo": "Motivo", "ultima_venta_disponible": "Última venta disponible",
     "corte": "Corte", "semana": "Semana", "grupo": "Grupo", "modelo": "Modelo", "cobertura": "Cobertura",
     "dias_observados": "Días con venta", "wape": "WAPE", "sesgo": "Sesgo", "rmsle": "RMSLE",
     "cobertura_p10_p90": "Cobertura P10–P90", "costo_negocio": "Costo diario",
@@ -31,7 +32,7 @@ COLUMNAS = {
     "ahorro_vs_referencia": "Ahorro vs referencia",
 }
 PORCENTAJES = {"wape", "sesgo", "cobertura_p10_p90", "nivel_servicio", "objetivo_servicio", "ahorro_vs_referencia"}
-TEXTO = {"corte", "semana", "grupo", "modelo", "cobertura"}
+TEXTO = {"corte", "semana", "grupo", "modelo", "cobertura", "motivo", "ultima_venta_disponible"}
 
 
 def _celda(col: str, valor) -> str:
@@ -61,7 +62,13 @@ def _tabla(df: pd.DataFrame, columnas: list[str]) -> str:
 
 
 def html(fecha: pd.Timestamp, por_corte: pd.DataFrame, por_semana: pd.DataFrame,
-         por_pedido: pd.DataFrame, correcciones: int) -> str:
+         por_pedido: pd.DataFrame, correcciones: int, omitidos: pd.DataFrame | None = None) -> str:
+    omitidos = omitidos if omitidos is not None else pd.DataFrame()
+    seccion_omitidos = ""
+    if len(omitidos):
+        seccion_omitidos = ("<h2>Cortes sin publicación</h2><p>No se publicó pronóstico ni pedido porque las "
+                            "ventas estaban demasiado atrasadas al corte.</p>"
+                            + _tabla(omitidos, ["corte", "motivo", "ultima_venta_disponible"]))
     total = por_pedido[por_pedido["grupo"] == "total"] if len(por_pedido) else por_pedido
     resumen = ""
     if len(total):
@@ -76,7 +83,7 @@ def html(fecha: pd.Timestamp, por_corte: pd.DataFrame, por_semana: pd.DataFrame,
 <h1>Seguimiento del desempeño</h1>
 <p>Datos conocidos al {fecha:%Y-%m-%d}. Las ventas reales incluyen las {correcciones} correcciones que
 llegaron hasta esa fecha. Cada corte se evalúa solo en los días cuya venta ya se conoce.</p>
-
+{seccion_omitidos}
 <h2>Pedido sugerido</h2>
 <p>Solo cortes cuya semana de cobertura ya terminó. Servicio: proporción de tiendas y familias en que
 la venta de la semana no superó lo pedido; el objetivo es la proporción crítica de los costos.</p>

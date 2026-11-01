@@ -1,7 +1,7 @@
 PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python)
 export PYTHONPATH := src
 
-.PHONY: test origen ingesta preparar backtest entrenar publicar reproducir seguimiento airflow-up airflow-down operar
+.PHONY: test origen ingesta preparar backtest entrenar publicar reproducir seguimiento airflow-up airflow-down operar reiniciar
 
 test:
 	$(PYTHON) -m pytest -q
@@ -62,3 +62,9 @@ operar:
 	$(COMPOSE) exec airflow-scheduler airflow dags unpause ingesta_validacion
 	$(COMPOSE) exec airflow-scheduler airflow dags unpause pronostico_pedido
 	$(COMPOSE) exec airflow-scheduler airflow dags unpause seguimiento_desempeno
+
+# Borra el estado generado (base de metadatos de Airflow, ingesta, procesados, modelos, publicaciones
+# y reportes) para volver a operar desde cero. No toca data/raw/kaggle ni origen/.
+reiniciar:
+	$(COMPOSE) down -v
+	rm -rf data/ingesta data/procesados data/publicado data/reportes models airflow/logs

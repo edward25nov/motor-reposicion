@@ -5,7 +5,7 @@ Los DAGs solo orquestan: cada tarea llama a una función de este paquete con la 
 
 import pandas as pd
 
-from inventario import config, rutas
+from inventario import config
 from inventario.modelos import entrenar, registro
 
 
@@ -42,14 +42,10 @@ def entrenar_si_corresponde(corte: str) -> str:
 # guardas no omitirían nada.
 
 def _bandeja() -> list[tuple[str, str, str]]:
-    """(llegada, fuente, clave) de todos los archivos de la bandeja."""
-    archivos = []
-    for carpeta in (rutas.origen() / "bandeja").glob("llegada=*"):
-        llegada = carpeta.name.removeprefix("llegada=")
-        for ruta in carpeta.glob("*.csv"):
-            fuente, _, clave = ruta.stem.partition("_")
-            archivos.append((llegada, fuente, clave))
-    return archivos
+    """(llegada, fuente, clave) de todos los archivos reconocidos de la bandeja."""
+    from inventario.ingesta.ingestar import escanear_bandeja
+
+    return [(llegada, fuente, clave) for llegada, fuente, clave, _ in escanear_bandeja("9999-12-31")[0]]
 
 
 def hay_bandeja(fecha: str) -> bool:

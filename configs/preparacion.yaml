@@ -1,4 +1,4 @@
-# Preparación de los datos para el modelo. Decisiones en DECISIONES.md (D14 a D18).
+# Preparación de los datos para el modelo. Decisiones en DECISIONES.md (D14 a D18 y D38).
 
 corte:
   dia_semana: 0           # 0 = lunes: cada lunes se emite el pronóstico y el pedido
@@ -14,6 +14,11 @@ disponibilidad:
   feriados_meses_anticipacion: 1
   # Si la última venta disponible es más vieja que T - ventas_atraso - tolerancia, no se pronostica.
   tolerancia_atraso_ventas: 3
+
+calidad:
+  # Advertencia (no error) si el total diario de una tienda se aleja más de este factor de la
+  # mediana del mismo día de la semana en las 8 semanas previas. Los feriados no se revisan.
+  factor_atipico: 5
 
 features:
   ventanas_dias: [7, 14, 28, 56]   # medias móviles de log(1 + ventas)

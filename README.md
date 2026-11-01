@@ -8,7 +8,7 @@ rastrearse hasta el código, los datos y el modelo que lo produjeron.
 
 Datos: Corporación Favorita (Kaggle *Store Sales – Time Series Forecasting*). Laboratorio 1 del
 curso Product Development. Las decisiones técnicas y de producto, con sus alternativas y
-justificación, están en [`DECISIONES.md`](DECISIONES.md) (D1 a D37).
+justificación, están en [`DECISIONES.md`](DECISIONES.md) (D1 a D39).
 
 **Contenido**
 
@@ -121,8 +121,55 @@ Notas:
   para no chocar con otros Airflow del equipo (D29).
 - La interfaz de Airflow muestra las fechas en la zona horaria del navegador: en Guatemala (UTC−6)
   el corte del lunes 2017-08-14 00:00 UTC aparece como 2017-08-13 18:00.
-- Para volver a ejecutar desde cero: `docker compose -f airflow/docker-compose.yaml down -v` y
-  borrar `data/ingesta`, `data/procesados`, `data/publicado`, `data/reportes` y `models`.
+- Para volver a ejecutar desde cero: `make reiniciar` (borra la base de Airflow y todo lo generado,
+  pero no los CSV de Kaggle ni el origen) y luego `make airflow-up` y `make operar`. En Linux,
+  `airflow/logs/` puede pertenecer al usuario del contenedor; si `make reiniciar` no puede borrarlo,
+  usar `sudo rm -rf airflow/logs`.
+
+### Evaluar otro periodo o agregar archivos a la bandeja
+
+El flujo opera sobre lo que haya en `origen/bandeja/`, para cualquier rango de fechas:
+
+- **Agregar archivos:** siempre **después del primer `make airflow-up`**, copiar los archivos en
+  `origen/bandeja/llegada=AAAA-MM-DD/`, donde la fecha es el día en que el archivo queda
+  disponible, y ejecutar `make operar DESDE=… HASTA=…` sobre ese rango. En un clon nuevo, el primer
+  `make airflow-up` genera `origen/` completo y reemplaza lo que hubiera: los archivos copiados
+  antes se pierden. Después, el generador solo vuelve a reconstruir el origen si cambian los CSV de
+  Kaggle o `configs/bandeja.yaml` (D30); si no, no toca la bandeja.
+- **Corregir un dato ya entregado:** enviar un archivo con el mismo nombre en una carpeta de
+  llegada posterior. Un archivo de una llegada ya procesada no se reprocesa aunque se cambie
+  (se reporta como modificado, D12).
+- **Mover el inicio de la bandeja:** cambiar `inicio_bandeja` en `configs/bandeja.yaml`, ejecutar
+  `make reiniciar` y luego `make airflow-up` (el origen se regenera solo porque cambió la
+  configuración) y `make operar` con el nuevo rango.
+
+Contrato de cada archivo (las columnas de más se ignoran con advertencia; las validaciones están
+en D10):
+
+| Fuente | Nombre del archivo | Columnas | La clave es |
+|---|---|---|---|
+| Ventas | `ventas_AAAA-MM-DD.csv` | `date, store_nbr, family, sales` | la fecha de las ventas |
+| Promociones | `promociones_AAAA-MM-DD.csv` | `date, store_nbr, family, onpromotion` | la fecha de la promoción |
+| Transacciones | `transacciones_AAAA-MM-DD.csv` | `date, store_nbr, transactions` | la fecha de las transacciones |
+| Petróleo | `petroleo_AAAA-MM-DD.csv` | `date, dcoilwtico` (puede ser nulo) | la fecha del precio |
+| Feriados | `feriados_AAAA-MM.csv` | `date, type, locale, locale_name, description, transferred` | el mes del calendario |
+| Tiendas | `tiendas_AAAA-MM-DD.csv` | `store_nbr, city, state, type, cluster` | el día del anuncio |
+
+Qué pasa en cada situación:
+
+- **Archivo inválido** (columnas faltantes, tipos, negativos, duplicados, fecha distinta a la
+  clave): va a cuarentena y se espera el reenvío; la ingesta no falla.
+- **Archivo con nombre fuera del contrato:** se ignora y se lista en `no_reconocidos` del reporte
+  de ingesta.
+- **Tienda o familia nueva:** sus filas se guardan con advertencia; la tienda se pronostica cuando
+  llega su registro en `tiendas_…` y la familia, como categoría no vista.
+- **Ventas atrasadas más de 4 días al corte:** el corte no se publica, queda registrado con su
+  motivo en `data/procesados/calidad/` y en el seguimiento, y el lunes siguiente se vuelve a
+  intentar.
+- **Faltan promociones o transacciones:** se pronostica igual y el reporte de calidad lo advierte;
+  la variable queda vacía para esos días.
+- **Total diario de una tienda muy lejos de lo habitual:** advertencia de atípico (D38).
+- **Fechas posteriores a la última llegada de la bandeja:** las corridas se omiten (D36).
 
 ## Evidencia de funcionamiento
 
@@ -263,9 +310,9 @@ correcciones: la lectura as-of usa solo lo que había llegado al corte (D13, D27
 | Airflow 3 con Docker Compose | `airflow/` (Airflow 3.3.2) | D29, D30 |
 | DAGs de ingesta y validación, preparación, pronóstico y pedido, seguimiento | `dags/` | D31 |
 | Tareas idempotentes | pruebas `test_es_idempotente`, `test_preparar_un_corte_es_idempotente`, `test_una_publicacion_no_se_modifica` | D8, D9, D27 |
-| Datos inválidos detenidos; situaciones esperadas sin fallas | cuarentena en la ingesta, `DatosInsuficientes`, guardas `en_operacion`; [evidencia](#cómo-reaccionó-el-flujo-a-las-situaciones-de-la-operación) | D10, D11, D17, D36 |
+| Datos inválidos detenidos; situaciones esperadas sin fallas | cuarentena en la ingesta, cortes sin datos suficientes omitidos con su motivo, guardas `en_operacion`, advertencias de calidad; [evidencia](#cómo-reaccionó-el-flujo-a-las-situaciones-de-la-operación) | D10, D11, D17, D36, D38 |
 | Backfill y reprocesamiento de datos corregidos | `make operar`; corrección detectada y reflejada en el seguimiento | D9, D12, D32, D35 |
-| Lógica en módulos con pruebas; los DAGs solo orquestan | `src/inventario/` (89 pruebas en `tests/`) | — |
+| Lógica en módulos con pruebas; los DAGs solo orquestan | `src/inventario/` (96 pruebas en `tests/`) | — |
 | Baseline simple | `src/inventario/modelos/baseline.py` | D19 |
 | Modelo de ML que mejora al baseline; deep learning justificado | `src/inventario/modelos/gbm.py`; [comparación](#comparación-de-modelos) | D20, D22 |
 | Validación temporal igual para todos los modelos | `src/inventario/modelos/evaluacion.py`, `backtest.py` | D22 |
@@ -379,11 +426,11 @@ src/inventario/
   seguimiento/    métricas de lo publicado y reporte HTML
   operacion.py    cuándo reentrenar y guardas de fin de operación
   versionado.py   dvc add / push desde el flujo
-tests/            89 pruebas con pytest (datos sintéticos con la forma de Kaggle)
+tests/            96 pruebas con pytest (datos sintéticos con la forma de Kaggle)
 docs/evidencias/  capturas de Airflow, comparación de modelos, seguimiento y reproducción
 data/, models/    generados por el flujo; en Git solo sus punteros .dvc
 CLAUDE.md         reglas del proyecto para el agente de programación
-DECISIONES.md     decisiones técnicas y de producto (D1 a D37)
+DECISIONES.md     decisiones técnicas y de producto (D1 a D39)
 ```
 
 Las pruebas corren en cada Pull Request con GitHub Actions y localmente con `make test`. Cubren,

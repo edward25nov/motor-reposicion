@@ -11,8 +11,11 @@ La primera vez también valida y carga la carga histórica; si es inválida, fal
 puede operar. Un archivo inválido de la bandeja no hace fallar la ingesta: queda en cuarentena y
 no contamina nada.
 
-Es idempotente: un archivo ya registrado con el mismo contenido no se vuelve a procesar. La
-bandeja solo se lee.
+Es idempotente: un archivo ya registrado no se vuelve a procesar. Una llegada ya procesada es
+inmutable por contrato: si el archivo cambia después de recibido, se conserva la versión original
+y se reporta como "modificado" (así no cambia la huella de lo ya publicado). Los archivos cuyo
+nombre no sigue el contrato (<fuente>_<clave>.csv dentro de llegada=AAAA-MM-DD/) se reportan como
+"no reconocidos". La bandeja solo se lee.
 
 Uso:
     PYTHONPATH=src python -m inventario.ingesta.ingestar 2017-06-15
@@ -20,6 +23,7 @@ Uso:
 
 import hashlib
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -104,22 +108,45 @@ def contexto_inicial() -> Contexto:
     )
 
 
-def archivos_bandeja(corte: str) -> list[tuple[str, str, str, Path]]:
-    """(llegada, fuente, clave, ruta) de la bandeja con llegada ≤ corte, en orden de proceso."""
-    archivos = []
-    for carpeta in (rutas.origen() / "bandeja").glob("llegada=*"):
-        llegada = carpeta.name.removeprefix("llegada=")
+CARPETA = re.compile(r"llegada=(\d{4}-\d{2}-\d{2})")
+
+
+def escanear_bandeja(corte: str) -> tuple[list[tuple[str, str, str, Path]], list[str]]:
+    """Archivos de la bandeja con llegada ≤ corte.
+
+    Devuelve (reconocidos, no_reconocidos): reconocidos son (llegada, fuente, clave, ruta) en orden
+    de proceso; no_reconocidos, las rutas relativas de lo que no sigue el contrato de nombres.
+    """
+    bandeja = rutas.origen() / "bandeja"
+    reconocidos, no_reconocidos = [], []
+    for entrada in sorted(bandeja.iterdir()) if bandeja.is_dir() else []:
+        m = CARPETA.fullmatch(entrada.name)
+        if not (entrada.is_dir() and m):
+            no_reconocidos.append(entrada.name)
+            continue
+        llegada = m.group(1)
         if llegada > corte:
             continue
-        for ruta in carpeta.glob("*.csv"):
+        for ruta in sorted(entrada.iterdir()):
             fuente, _, clave = ruta.stem.partition("_")
-            if fuente in ORDEN_FUENTES and clave:
-                archivos.append((llegada, fuente, clave, ruta))
-    return sorted(archivos, key=lambda a: (a[0], ORDEN_FUENTES.index(a[1]), a[2]))
+            if ruta.suffix == ".csv" and fuente in ORDEN_FUENTES and clave:
+                reconocidos.append((llegada, fuente, clave, ruta))
+            else:
+                no_reconocidos.append(f"{entrada.name}/{ruta.name}")
+    reconocidos.sort(key=lambda a: (a[0], ORDEN_FUENTES.index(a[1]), a[2]))
+    return reconocidos, no_reconocidos
 
 
-def reporte(con, corte: str) -> dict:
-    """Lo que llegó el día del corte y cómo quedó. Solo depende del registro: es idempotente."""
+def archivos_bandeja(corte: str) -> list[tuple[str, str, str, Path]]:
+    """(llegada, fuente, clave, ruta) de la bandeja con llegada ≤ corte, en orden de proceso."""
+    return escanear_bandeja(corte)[0]
+
+
+def reporte(con, corte: str, no_reconocidos: list[str], modificados: list[dict]) -> dict:
+    """Lo que llegó el día del corte y cómo quedó, más las anomalías de la bandeja hasta el corte.
+
+    Depende solo del registro y del contenido de la bandeja: es idempotente.
+    """
     del_dia = registro.tabla(con, "llegada=?", (corte,))
     return {
         "corte": corte,
@@ -131,6 +158,8 @@ def reporte(con, corte: str) -> dict:
                                     ["fuente", "clave"]].to_dict("records"),
         "advertencias": del_dia.loc[del_dia["advertencias"] != "[]",
                                     ["fuente", "clave", "advertencias"]].to_dict("records"),
+        "no_reconocidos": no_reconocidos,
+        "modificados_despues_de_recibidos": modificados,
     }
 
 
@@ -140,10 +169,14 @@ def ejecutar(corte: str) -> dict:
     try:
         cargar_historico(con)
         contexto = contexto_inicial()
-        procesados = 0
-        for llegada, fuente, clave, ruta in archivos_bandeja(corte):
+        procesados, modificados = 0, []
+        reconocidos, no_reconocidos = escanear_bandeja(corte)
+        for llegada, fuente, clave, ruta in reconocidos:
             hash_ = _md5(ruta)
-            if registro.hash_registrado(con, fuente, clave, llegada) == hash_:
+            registrado = registro.hash_registrado(con, fuente, clave, llegada)
+            if registrado is not None:
+                if registrado != hash_:
+                    modificados.append({"fuente": fuente, "clave": clave, "llegada": llegada})
                 if fuente == "tiendas":
                     contexto.tiendas |= _tiendas_validas(con, clave, llegada)
                 continue
@@ -154,7 +187,7 @@ def ejecutar(corte: str) -> dict:
             if fuente == "tiendas" and fila["estado"] == "valido":
                 contexto.tiendas |= _tiendas_validas(con, clave, llegada)
             procesados += 1
-        resumen = reporte(con, corte)
+        resumen = reporte(con, corte, no_reconocidos, modificados)
     finally:
         con.close()
     destino = rutas.ingesta() / "reportes" / f"{corte}.json"
@@ -162,6 +195,11 @@ def ejecutar(corte: str) -> dict:
     destino.write_text(json.dumps(resumen, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"ingesta {corte}: {procesados} archivos procesados; {resumen['por_tipo']}; "
           f"{len(resumen['cuarentena'])} en cuarentena")
+    if no_reconocidos:
+        print(f"ingesta {corte}: ADVERTENCIA, archivos con nombre no reconocido (se ignoran): {no_reconocidos}")
+    if modificados:
+        print(f"ingesta {corte}: ADVERTENCIA, archivos modificados después de recibidos "
+              f"(se conserva la versión original): {modificados}")
     return resumen
 
 

@@ -84,9 +84,7 @@ def test_lectura_as_of_respeta_la_llegada(proyecto, datos):
     ingestar.ejecutar("2017-08-31")
     inc = incidentes(proyecto).query("tipo == 'correccion'").iloc[0]
     train = datos["train"]
-    # Antes de su anuncio (2017-06-13) las filas en cero de la tienda 5 se descartan con advertencia.
-    anunciada = (train["store_nbr"] != 5) | (train["date"] >= "2017-06-13")
-    real = (train.loc[(train["date"] == inc.clave) & anunciada, ["store_nbr", "family", "sales"]]
+    real = (train.loc[train["date"] == inc.clave, ["store_nbr", "family", "sales"]]
             .sort_values(["store_nbr", "family"]).reset_index(drop=True))
 
     def ventas_del_dia(corte):
@@ -127,3 +125,38 @@ def test_archivo_ilegible_va_a_cuarentena(proyecto, monkeypatch, tmp_path_factor
     t = archivos(proyecto).set_index(["fuente", "clave", "llegada"])
     fila = t.loc[("ventas", "2017-06-04", "2017-06-05")]
     assert fila["estado"] == "cuarentena" and "no se pudo leer" in fila["errores"]
+
+
+def test_tienda_anunciada_despues_usa_sus_ventas_anteriores(proyecto):
+    """La tienda 5 vende antes de anunciarse (2017-06-13): esas filas se guardan y se usan al anunciarse."""
+    from inventario.preparacion.features import Insumos
+    from inventario.preparacion.preparar import datos_al_corte
+
+    ingestar.ejecutar("2017-08-31")
+    antes = Insumos.desde(datos_al_corte("2017-06-12"))
+    assert 5 not in set(antes.series["store_nbr"])                 # aún no está en el maestro
+    despues = Insumos.desde(datos_al_corte("2017-06-19"))
+    filas = (despues.series["store_nbr"] == 5).to_numpy()
+    previas = despues.fechas.get_indexer(pd.date_range("2017-06-01", "2017-06-12"))
+    assert filas.any() and not pd.isna(despues.ventas[filas][:, previas]).all()
+
+
+def test_reporta_archivos_no_reconocidos_y_modificados(proyecto, monkeypatch, tmp_path_factory):
+    import shutil
+
+    origen = tmp_path_factory.mktemp("origen_raro")
+    shutil.copytree(proyecto / "origen", origen, dirs_exist_ok=True)
+    monkeypatch.setenv("MOTOR_ORIGEN", str(origen))
+    ingestar.ejecutar("2017-06-05")
+    (origen / "bandeja" / "llegada=2017-06-05" / "train_2017-06-04.csv").write_text("x\n1\n")
+    (origen / "bandeja" / "ventas.csv").write_text("x\n1\n")
+    original = origen / "bandeja" / "llegada=2017-06-05" / "ventas_2017-06-04.csv"
+    antes = archivos(proyecto)
+    df = pd.read_csv(original)
+    df.loc[0, "sales"] = df.loc[0, "sales"] + 1000
+    df.to_csv(original, index=False)
+    reporte = ingestar.ejecutar("2017-06-05")
+    assert set(reporte["no_reconocidos"]) == {"llegada=2017-06-05/train_2017-06-04.csv", "ventas.csv"}
+    assert reporte["modificados_despues_de_recibidos"] == [
+        {"fuente": "ventas", "clave": "2017-06-04", "llegada": "2017-06-05"}]
+    pd.testing.assert_frame_equal(archivos(proyecto), antes)           # se conserva la versión original

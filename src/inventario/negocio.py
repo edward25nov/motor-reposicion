@@ -14,3 +14,10 @@ def costos(familias: pd.Series, cfg: dict) -> pd.DataFrame:
     tabla = pd.DataFrame(pares, columns=["costo_faltante", "costo_sobrante"], index=familias.index)
     tabla["proporcion_critica"] = tabla["costo_faltante"] / (tabla["costo_faltante"] + tabla["costo_sobrante"])
     return tabla
+
+
+def grupo(familias: pd.Series, cfg: dict) -> pd.Series:
+    """Nombre del grupo de costos de cada familia (las que no están en ningún grupo: por_defecto)."""
+    por_familia = {f: nombre for nombre, g in cfg.get("grupos", {}).items() for f in g["familias"]}
+    defecto = cfg["por_defecto"].get("nombre", "por_defecto")
+    return familias.astype(str).map(lambda f: por_familia.get(f, defecto))

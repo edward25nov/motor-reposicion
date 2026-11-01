@@ -117,3 +117,32 @@ def test_publicar_sin_features_o_sin_modelo_falla(tmp_path, monkeypatch):
     monkeypatch.setenv("MOTOR_RAIZ", str(tmp_path))
     with pytest.raises(FileNotFoundError, match="features"):
         publicar.ejecutar(CORTE)
+
+
+def test_cambios_sin_commit_ignora_los_punteros_dvc(tmp_path):
+    import subprocess
+
+    from inventario.modelos import registro
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "modulo.py").write_text("x = 1\n")
+    (tmp_path / "models.dvc").write_text("md5: a\n")
+    git("init", "-q")
+    git("add", ".")
+    git("-c", "user.name=prueba", "-c", "user.email=prueba@example.com", "commit", "-qm", "inicial")
+    assert registro.cambios_sin_commit(tmp_path) is False
+    (tmp_path / "models.dvc").write_text("md5: b\n")            # lo cambia el flujo en cada corte
+    assert registro.cambios_sin_commit(tmp_path) is False
+    (tmp_path / "src" / "modulo.py").write_text("x = 2\n")
+    assert registro.cambios_sin_commit(tmp_path) is True
+
+
+def test_avisa_si_la_proporcion_critica_queda_fuera_de_los_cuantiles(capsys):
+    from inventario.modelos.metricas import cantidad_critica
+
+    pred = pd.DataFrame([[10, 20, 30, 40, 50, 60]], columns=["p10", "p25", "p50", "p75", "p90", "p95"])
+    assert cantidad_critica(pred, Q, pd.Series([0.99]))[0] == 60
+    assert "fuera de los cuantiles" in capsys.readouterr().out
