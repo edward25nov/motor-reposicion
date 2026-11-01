@@ -122,17 +122,20 @@ Notas:
 - La interfaz de Airflow muestra las fechas en la zona horaria del navegador: en Guatemala (UTC−6)
   el corte del lunes 2017-08-14 00:00 UTC aparece como 2017-08-13 18:00.
 - Para volver a ejecutar desde cero: `make reiniciar` (borra la base de Airflow y todo lo generado,
-  pero no los CSV de Kaggle ni el origen) y luego `make airflow-up` y `make operar`.
+  pero no los CSV de Kaggle ni el origen) y luego `make airflow-up` y `make operar`. En Linux,
+  `airflow/logs/` puede pertenecer al usuario del contenedor; si `make reiniciar` no puede borrarlo,
+  usar `sudo rm -rf airflow/logs`.
 
 ### Evaluar otro periodo o agregar archivos a la bandeja
 
 El flujo opera sobre lo que haya en `origen/bandeja/`, para cualquier rango de fechas:
 
-- **Agregar archivos:** después de `make airflow-up`, copiar los archivos en
+- **Agregar archivos:** siempre **después del primer `make airflow-up`**, copiar los archivos en
   `origen/bandeja/llegada=AAAA-MM-DD/`, donde la fecha es el día en que el archivo queda
-  disponible, y ejecutar `make operar DESDE=… HASTA=…` sobre ese rango. Si se agregan antes de
-  `make airflow-up` y el generador tiene que reconstruir el origen (porque cambiaron los CSV de
-  Kaggle o `configs/bandeja.yaml`), los reemplaza; si no cambió nada, no toca la bandeja (D30).
+  disponible, y ejecutar `make operar DESDE=… HASTA=…` sobre ese rango. En un clon nuevo, el primer
+  `make airflow-up` genera `origen/` completo y reemplaza lo que hubiera: los archivos copiados
+  antes se pierden. Después, el generador solo vuelve a reconstruir el origen si cambian los CSV de
+  Kaggle o `configs/bandeja.yaml` (D30); si no, no toca la bandeja.
 - **Corregir un dato ya entregado:** enviar un archivo con el mismo nombre en una carpeta de
   llegada posterior. Un archivo de una llegada ya procesada no se reprocesa aunque se cambie
   (se reporta como modificado, D12).
@@ -309,7 +312,7 @@ correcciones: la lectura as-of usa solo lo que había llegado al corte (D13, D27
 | Tareas idempotentes | pruebas `test_es_idempotente`, `test_preparar_un_corte_es_idempotente`, `test_una_publicacion_no_se_modifica` | D8, D9, D27 |
 | Datos inválidos detenidos; situaciones esperadas sin fallas | cuarentena en la ingesta, cortes sin datos suficientes omitidos con su motivo, guardas `en_operacion`, advertencias de calidad; [evidencia](#cómo-reaccionó-el-flujo-a-las-situaciones-de-la-operación) | D10, D11, D17, D36, D38 |
 | Backfill y reprocesamiento de datos corregidos | `make operar`; corrección detectada y reflejada en el seguimiento | D9, D12, D32, D35 |
-| Lógica en módulos con pruebas; los DAGs solo orquestan | `src/inventario/` (89 pruebas en `tests/`) | — |
+| Lógica en módulos con pruebas; los DAGs solo orquestan | `src/inventario/` (96 pruebas en `tests/`) | — |
 | Baseline simple | `src/inventario/modelos/baseline.py` | D19 |
 | Modelo de ML que mejora al baseline; deep learning justificado | `src/inventario/modelos/gbm.py`; [comparación](#comparación-de-modelos) | D20, D22 |
 | Validación temporal igual para todos los modelos | `src/inventario/modelos/evaluacion.py`, `backtest.py` | D22 |
@@ -423,7 +426,7 @@ src/inventario/
   seguimiento/    métricas de lo publicado y reporte HTML
   operacion.py    cuándo reentrenar y guardas de fin de operación
   versionado.py   dvc add / push desde el flujo
-tests/            89 pruebas con pytest (datos sintéticos con la forma de Kaggle)
+tests/            96 pruebas con pytest (datos sintéticos con la forma de Kaggle)
 docs/evidencias/  capturas de Airflow, comparación de modelos, seguimiento y reproducción
 data/, models/    generados por el flujo; en Git solo sus punteros .dvc
 CLAUDE.md         reglas del proyecto para el agente de programación
