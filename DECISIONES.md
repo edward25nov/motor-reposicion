@@ -4,6 +4,53 @@ Cada decisión tiene su contexto, las alternativas consideradas y la justificaci
 sobre disponibilidad de la información en el tiempo, validación de datos y manejo de correcciones
 están marcadas con su tema.
 
+## Índice
+
+- **Infraestructura y versionado**
+  - D1. Remoto de DVC en DagsHub
+  - D2. El producto se reconstruye desde los CSV originales de Kaggle
+  - D3. Sin MLflow en este laboratorio
+- **Sistema de origen simulado**
+  - D4. La carpeta de la bandeja indica cuándo llegó cada archivo — *disponibilidad en el tiempo*
+  - D5. Corte entre carga histórica y bandeja: `inicio_bandeja = 2017-06-01` — *disponibilidad en el tiempo*
+  - D6. Frecuencia y anticipación de cada fuente — *disponibilidad en el tiempo*
+  - D7. Incidentes simulados en la bandeja — *validación de datos y manejo de correcciones*
+  - D8. Generación determinista e idempotente
+- **Ingesta y validación**
+  - D9. La ingesta procesa todo lo pendiente hasta el corte, no solo lo del día — *disponibilidad en el tiempo*
+  - D10. Errores contra advertencias — *validación de datos*
+  - D11. Un archivo inválido no hace fallar la ingesta; una carga histórica inválida sí — *validación de datos*
+  - D12. Tipos de llegada y detección de correcciones — *manejo de correcciones*
+  - D13. Lectura "as-of" desde el registro — *disponibilidad en el tiempo y manejo de correcciones*
+- **Preparación de datos para el modelo**
+  - D14. Corte semanal los lunes y horizonte de 14 días
+  - D15. La disponibilidad esperada de cada fuente es configuración del producto — *disponibilidad en el tiempo*
+  - D16. Features directas por horizonte, sin pronóstico recursivo
+  - D17. Datos faltantes al corte: seguir si es posible, detenerse si las ventas están muy atrasadas — *validación de datos*
+  - D18. Entrenamiento con cortes del pasado sobre una sola vista de los datos — *disponibilidad en el tiempo*
+- **Modelado**
+  - D19. Baseline: ingenuo estacional con cuantiles empíricos
+  - D20. Modelo de ML: gradient boosting con pérdida cuantílica, sin deep learning
+  - D21. Métrica de negocio: costo del cuantil crítico diario
+  - D22. Validación temporal de origen móvil, igual para todos los modelos
+  - D23. Regla explícita para reemplazar al modelo vigente
+  - D24. Proceso campeón-retador y registro de modelos — *disponibilidad en el tiempo*
+- **Pedido sugerido y publicación**
+  - D25. El pedido es la suma de los cuantiles críticos diarios del periodo de cobertura
+  - D26. Entrega a dos días y cobertura de una semana; sin inventario informado
+  - D27. Publicación inmutable con manifest, y reproducción — *manejo de correcciones*
+  - D28. Tiendas o categorías que el modelo no vio al entrenar
+- **Orquestación con Airflow**
+  - D29. Un entorno de Airflow propio y con las mismas versiones que el código
+  - D30. El sistema de origen se genera antes de Airflow, una sola vez
+  - D31. DAGs independientes que comparten un pool de un solo cupo
+  - D32. Orden, backfill y modelo vigente "as-of" — *disponibilidad en el tiempo*
+  - D33. Reentrenamiento cada 4 semanas y versionado con DVC dentro del flujo
+  - D34. Los modelos se guardan con el pickler estándar, no con joblib
+  - D35. Seguimiento del desempeño con las ventas conocidas a la fecha — *manejo de correcciones*
+  - D36. El fin de la operación simulada se detecta por los datos, no por fechas fijas
+  - D37. Límite de hilos para el entrenamiento dentro de Airflow
+
 ## Infraestructura y versionado
 
 ### D1. Remoto de DVC en DagsHub
@@ -452,14 +499,15 @@ fecha lógica.
   Con la marca, levantar Airflow otra vez no reescribe la bandeja, ni pisa archivos que alguien
   haya agregado o cambiado a mano para probar situaciones nuevas.
 
-### D31. Dos DAGs independientes que comparten un pool de un solo cupo
+### D31. DAGs independientes que comparten un pool de un solo cupo
 - **Decisión:** `ingesta_validacion` corre todos los días; `pronostico_pedido` corre los lunes y
-  empieza poniendo al día la ingesta hasta su corte, en lugar de esperar al DAG diario con un
-  sensor. Todas las tareas usan el pool `motor` de un cupo.
+  `seguimiento_desempeno` todos los días (D35). Los dos últimos empiezan poniendo al día la
+  ingesta hasta su fecha, en lugar de esperar al DAG diario con un sensor. Todas las tareas usan el
+  pool `motor` de un cupo.
 - **Alternativas:** un sensor entre DAGs; un solo DAG diario que pronostique los lunes; DAGs
   disparados por Assets.
-- **Justificación:** como la ingesta es idempotente y procesa todo lo pendiente (D9), el DAG
-  semanal no depende de que el diario haya corrido, y no hay sensores que puedan quedar esperando
+- **Justificación:** como la ingesta es idempotente y procesa todo lo pendiente (D9), ningún DAG
+  depende de que otro haya corrido, y no hay sensores que puedan quedar esperando
   para siempre. Las corridas disparadas por Assets no tienen fecha lógica, y aquí la fecha lógica
   es el corte. El pool de un cupo evita que dos tareas escriban a la vez el registro SQLite, los
   modelos o el caché de DVC.
@@ -538,3 +586,16 @@ fecha lógica.
   dispare la corrida (backfill, programada o manual) y sirve para cualquier periodo que se ejecute.
   Distingue "ya no hay más datos en el origen" (se omite) de "faltan datos que debían llegar" (se
   alerta). En producción la bandeja no termina y la guarda no omitiría nada.
+
+### D37. Límite de hilos para el entrenamiento dentro de Airflow
+- **Decisión:** el compose fija `OMP_NUM_THREADS=4` y sube
+  `AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT` de 300 a 1200 segundos.
+- **Alternativas:** dejar los valores por defecto y confiar en los reintentos.
+- **Justificación:** en la corrida final, el entrenamiento del 2017-07-31 dejó de enviar su
+  *heartbeat* por más de 5 minutos: el scheduler lo dio por muerto, lo terminó con SIGKILL y el
+  reintento (`retries: 1`) lo completó. El gradient boosting de scikit-learn usa por defecto todos
+  los núcleos (18 en el equipo de desarrollo) y deja sin CPU al resto de los procesos de Airflow.
+  Medido dentro del contenedor, con 4 hilos un cuantil se entrena en 7.9 s frente a 9 s sin
+  límite: el límite no cuesta tiempo y deja CPU libre. El reintento resolvió el síntoma, pero
+  depender de él haría que en un equipo con menos recursos la tarea fallara de forma repetida. Los
+  resultados no cambian: el pronóstico usa el modelo ya guardado.
