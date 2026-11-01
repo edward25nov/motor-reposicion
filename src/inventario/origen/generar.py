@@ -14,7 +14,10 @@ Uso:
     make origen
 """
 
+import hashlib
+import json
 import shutil
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -74,10 +77,32 @@ def generar(datos: dict[str, pd.DataFrame], cfg: dict, destino: Path) -> dict:
     }
 
 
-def main() -> None:
-    resumen = generar(kaggle.leer(rutas.kaggle()), config.cargar("bandeja"), rutas.origen())
+def huella_insumos(cfg: dict) -> str:
+    """Hash de lo que determina el origen: los CSV de Kaggle, la configuración y este código."""
+    h = hashlib.md5(json.dumps(cfg, sort_keys=True).encode())
+    for archivo in sorted(kaggle.ARCHIVOS.values()):
+        h.update((rutas.kaggle() / archivo).read_bytes())
+    for modulo in ("generar.py", "entregas.py"):
+        h.update((Path(__file__).parent / modulo).read_bytes())
+    return h.hexdigest()
+
+
+def main(forzar: bool = False) -> None:
+    """Genera el origen salvo que ya exista uno generado con los mismos insumos.
+
+    Así levantar Airflow de nuevo no reescribe la bandeja (ni cambios hechos a mano en ella).
+    """
+    cfg = config.cargar("bandeja")
+    datos = kaggle.leer(rutas.kaggle())
+    huella = huella_insumos(cfg)
+    marca = rutas.origen() / ".generado.json"
+    if not forzar and marca.is_file() and json.loads(marca.read_text())["huella"] == huella:
+        print(f"origen en {rutas.origen()} ya generado con los mismos insumos: no se modifica")
+        return
+    resumen = generar(datos, cfg, rutas.origen())
+    marca.write_text(json.dumps({"huella": huella, **resumen}, indent=2, default=str) + "\n")
     print(f"origen generado en {rutas.origen()}: {resumen}")
 
 
 if __name__ == "__main__":
-    main()
+    main(forzar="--forzar" in sys.argv)

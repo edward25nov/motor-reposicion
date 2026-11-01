@@ -1,13 +1,20 @@
 """Registro de modelos: versiones entrenadas, su evaluación, la decisión tomada y cuál es el vigente.
 
     models/registro.json                 {"vigente": "<version>", "versiones": {...}}
-    models/<version>/modelo.joblib       el modelo
+    models/<version>/modelo.pkl.gz       el modelo (pickle estándar comprimido)
+
+El vigente se consulta "as-of": en el corte T vale la última versión aprobada (vigente inicial o
+promovida) con snapshot <= T. Así un corte nunca usa un modelo entrenado con datos posteriores,
+aunque los cortes se procesen fuera de orden.
 """
 
+import gzip
 import json
+import pickle
 import subprocess
+from pathlib import Path
 
-import joblib
+import pandas as pd
 
 from inventario import rutas
 
@@ -31,19 +38,49 @@ def guardar(registro: dict) -> None:
     tmp.replace(ruta)
 
 
+def ruta_modelo(version: str) -> Path:
+    return rutas.modelos() / version / "modelo.pkl.gz"
+
+
 def guardar_modelo(version: str, modelo) -> None:
-    ruta = rutas.modelos() / version / "modelo.joblib"
+    """Guarda con el pickler en C de Python, comprimido con gzip sin fecha (archivo determinista).
+
+    No se usa joblib: su pickler es el de Python puro, que `dill` modifica de forma global apenas se
+    importa (Airflow lo importa en las tareas), y el archivo quedaba dependiendo de `dill`.
+    """
+    ruta = ruta_modelo(version)
     ruta.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(modelo, ruta, compress=3)
+    tmp = ruta.with_suffix(".tmp")
+    with open(tmp, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb", mtime=0) as gz:
+        pickle.dump(modelo, gz, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp.replace(ruta)
 
 
 def cargar_modelo(version: str):
-    return joblib.load(rutas.modelos() / version / "modelo.joblib")
+    with gzip.open(ruta_modelo(version), "rb") as gz:
+        return pickle.load(gz)
 
 
-def vigente() -> tuple[str, object] | None:
-    """(versión, modelo) del vigente, o None si todavía no hay ninguno."""
-    version = cargar()["vigente"]
+APROBADAS = ("vigente inicial", "promovido")
+
+
+def vigente_al(corte, reg: dict | None = None) -> str | None:
+    """Versión vigente en el corte: la última aprobada con snapshot <= corte (o None)."""
+    reg = reg if reg is not None else cargar()
+    corte = pd.Timestamp(corte)
+    vigente = None
+    # En un mismo snapshot el baseline (vigente inicial) va antes que el retador que se le compara.
+    for nombre, v in sorted(reg["versiones"].items(), key=lambda kv: (kv[1]["snapshot"], kv[1]["tipo"] != "baseline")):
+        if pd.Timestamp(v["snapshot"]) > corte:
+            break
+        if v["decision"] in APROBADAS:
+            vigente = nombre
+    return vigente
+
+
+def vigente(corte) -> tuple[str, object] | None:
+    """(versión, modelo) vigente en el corte, o None si todavía no hay ninguno."""
+    version = vigente_al(corte)
     return (version, cargar_modelo(version)) if version else None
 
 

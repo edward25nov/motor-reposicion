@@ -420,3 +420,87 @@ están en `configs/negocio.yaml` (sección `pedido`).
 - **Justificación:** el gradient boosting ya aprende qué hacer con faltantes, así que la tienda
   nueva recibe un pronóstico razonable en lugar de un error. Hay una prueba que entrena sin una
   tienda y exige pronóstico completo para ella.
+
+## Orquestación con Airflow
+
+Airflow 3.3.2 corre con Docker Compose desde `airflow/` (`make airflow-up`, `make operar`). Los DAGs
+están en `dags/` y solo orquestan: cada tarea importa una función de `src/inventario/` y le pasa la
+fecha lógica.
+
+### D29. Un entorno de Airflow propio y con las mismas versiones que el código
+- **Decisión:** el proyecto Compose se llama `motor-reposicion`, con imagen
+  `motor-reposicion-airflow:3.3.2`, volumen `motor-reposicion_postgres-db` y la interfaz en el puerto
+  8081. `requirements.txt` fija las versiones de pandas, numpy, scikit-learn, pyarrow, scipy,
+  PyYAML y joblib a las restricciones de Airflow 3.3.2, y lo usan el entorno local, el CI y la
+  imagen. El repositorio se monta completo en `/opt/motor` (fuera de `/opt/airflow`, cuyo dueño
+  cambia `airflow-init`) y el sistema de origen, en `/opt/origen` en solo lectura.
+- **Alternativas:** reutilizar el compose de la clase 4; dejar las versiones libres.
+- **Justificación:** el compose de la clase 4 no fija `name:`, así que Docker usa el nombre de la
+  carpeta (`airflow`) y dos proyectos compartirían el volumen de Postgres (comprobado: el volumen
+  `airflow_postgres-db-volume` ya existía). Con versiones idénticas, un modelo serializado con
+  joblib carga igual en el equipo, en el CI y en Airflow, y los resultados son reproducibles.
+  Montar la bandeja en solo lectura hace cumplir, a nivel del sistema operativo, que el flujo
+  nunca la modifique.
+
+### D30. El sistema de origen se genera antes de Airflow, una sola vez
+- **Decisión:** el servicio `origen` del compose genera la carga histórica y la bandeja desde
+  `data/raw/kaggle/` y termina antes de que arranque Airflow. Guarda una marca con el hash de los
+  CSV, la configuración y el código del generador; si al volver a levantar todo coincide, no
+  regenera nada.
+- **Alternativas:** un DAG que genere el origen; generarlo a mano con `make origen`.
+- **Justificación:** el origen simula un sistema externo: no le corresponde a Airflow construirlo.
+  Con la marca, levantar Airflow otra vez no reescribe la bandeja, ni pisa archivos que alguien
+  haya agregado o cambiado a mano para probar situaciones nuevas.
+
+### D31. Dos DAGs independientes que comparten un pool de un solo cupo
+- **Decisión:** `ingesta_validacion` corre todos los días; `pronostico_pedido` corre los lunes y
+  empieza poniendo al día la ingesta hasta su corte, en lugar de esperar al DAG diario con un
+  sensor. Todas las tareas usan el pool `motor` de un cupo.
+- **Alternativas:** un sensor entre DAGs; un solo DAG diario que pronostique los lunes; DAGs
+  disparados por Assets.
+- **Justificación:** como la ingesta es idempotente y procesa todo lo pendiente (D9), el DAG
+  semanal no depende de que el diario haya corrido, y no hay sensores que puedan quedar esperando
+  para siempre. Las corridas disparadas por Assets no tienen fecha lógica, y aquí la fecha lógica
+  es el corte. El pool de un cupo evita que dos tareas escriban a la vez el registro SQLite, los
+  modelos o el caché de DVC.
+
+### D32. Orden, backfill y modelo vigente "as-of" *(disponibilidad en el tiempo)*
+- **Decisión:** todas las tareas usan `depends_on_past=True` (un corte espera al anterior) y el
+  periodo se ejecuta con `airflow backfill create --reprocess-behavior failed` (corre las fechas
+  pendientes y reintenta las fallidas, sin rehacer las exitosas). `make operar` crea primero los
+  backfills y después activa los DAGs. `MOTOR_FIN_OPERACION` (2017-08-15, fin de los datos) es el
+  `end_date` de los DAGs. Además, el modelo que usa un corte T es el vigente "as-of": la última
+  versión aprobada con snapshot ≤ T (`registro.vigente_al`).
+- **Alternativas:** `catchup=True`; confiar en que el backfill siempre corre en orden.
+- **Justificación:** al activar un DAG con `catchup=False`, Airflow crea igual una corrida para la
+  fecha más reciente. Sin `end_date` sería una corrida de 2026 sin datos; sin `depends_on_past`, la
+  corrida del último lunes podría entrenar un modelo antes que la del primero. El modelo "as-of" es
+  la defensa de fondo: aunque algo corra fuera de orden, un pedido de junio nunca se calcula con un
+  modelo entrenado con datos de julio (hay una prueba que lo verifica). Es el principio
+  fundamental del enunciado aplicado también al modelo, no solo a los datos.
+
+### D33. Reentrenamiento cada 4 semanas y versionado con DVC dentro del flujo
+- **Decisión:** el DAG semanal entrena un retador si no hay modelo vigente o si pasaron 4 semanas
+  desde el último (`configs/modelo.yaml`, `reentrenar_cada_semanas`), y aplica la regla de D23. Al
+  final, `versionar` ejecuta `dvc add` de `data/ingesta`, `data/procesados`, `models` y
+  `data/publicado`, y `dvc push` solo si hay credenciales del remoto en `.dvc/config.local`.
+- **Alternativas:** reentrenar a mano; versionar con DVC solo desde el equipo del desarrollador.
+- **Justificación:** D24 midió que el modelo pierde poco por no ver las últimas semanas; 4 semanas
+  limitan ese atraso sin entrenar cada lunes. Versionar dentro del flujo cumple que los datos
+  procesados, los modelos y los pronósticos publicados queden versionados sin intervención manual.
+  Quien evalúa no tiene credenciales de DagsHub: en ese caso los datos quedan en el caché local de
+  DVC y el flujo sigue. El flujo no hace commits a Git; fijar una versión (los punteros `.dvc`) es
+  un commit del desarrollador.
+
+### D34. Los modelos se guardan con el pickler estándar, no con joblib
+- **Decisión:** `models/<version>/modelo.pkl.gz` se escribe con `pickle.dump` (el pickler en C de
+  Python, protocolo más alto) dentro de un gzip sin fecha.
+- **Alternativas:** `joblib.dump`, lo habitual con scikit-learn; instalar `dill` en todos los
+  entornos.
+- **Justificación:** al reproducir desde el equipo de desarrollo un pronóstico publicado por
+  Airflow, el modelo no cargaba: *No module named 'dill'*. Airflow importa `dill` en las tareas, y
+  `dill` modifica de forma global el pickler de Python puro, que es el que usa joblib; el modelo
+  quedaba dependiendo de `dill` según qué se hubiera importado antes. El pickler en C no se ve
+  afectado (hay una prueba que importa `dill`, guarda un modelo y verifica que el archivo no lo
+  menciona). Instalar `dill` en todas partes ocultaría el problema sin resolverlo. El gzip sin
+  fecha hace que el mismo modelo produzca siempre el mismo archivo y el mismo MD5 en el manifest.
