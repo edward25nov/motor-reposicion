@@ -38,8 +38,6 @@ x-airflow-common:
     # El sistema de origen simulado, en solo lectura: el flujo lee la bandeja, nunca la modifica.
     MOTOR_ORIGEN: /opt/origen
     PYTHONPATH: /opt/motor/src
-    # Última fecha con datos en Kaggle: los DAGs no programan corridas posteriores.
-    MOTOR_FIN_OPERACION: "2017-08-15"
   volumes:
     - ..:/opt/motor
     - ../origen:/opt/origen:ro
